@@ -1,0 +1,37 @@
+# Local builds and packaged executables
+/build*/
+/driver/kdmapper_src/
+*.exe
+*.dll
+*.sys
+*.obj
+*.pdb
+*.ilk
+*.lib
+*.exp
+*.zip
+*.bak
+*.tmp
+
+# Keep the independently maintained runtime source snapshot in dist.
+/dist/*
+!/dist/pyexec/
+/dist/pyexec/*
+!/dist/pyexec/bs_runtime.py
+!/dist/pyexec/cmd.py
+
+# User state and diagnostics
+/ipc/
+*.log
+/overlay_log.txt
+/pyexec/*.txt
+__pycache__/
+*.pyc
+.vs/
+.vscode/
+.env
+.env.*
+*.pem
+*.key
+Thumbs.db
+Desktop.ini

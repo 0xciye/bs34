@@ -1,0 +1,11 @@
+# Interface reference
+
+Operate mode. Match the supplied Roblox UI reference: flat charcoal ground (#101012), content (#151618), violet accent (#A48FF6), restrained borders and Segoe UI. Menu defaults to 900 × 620 with a 196 px rail, 36 px rounded navigation rows and authored line icons. Body text is 13 px, group headings 14 px semibold, page titles 20 px. Groups are flat; their heights follow content so long lists remain reachable in the scrolling body. Toggle rows use a 32 × 18 switch with an animated thumb and support keyboard activation through ImGui buttons.
+
+Do not include the reference's sidebar footer: no attachment dot, attachment text or Insert hint at the bottom of the menu. This exclusion is explicitly requested by the user. Keep CiyE naming and Blood Strike data; do not copy Roblox-only content.
+
+Skin lists have independent scroll areas, visible rarity, a search field and an explicit reload action. Loader is 680 px wide with a 264 px action column and a connected startup timeline on the right; its existing options and callbacks remain. State markers use actual process/session state, without fabricated readiness or percentage progress. Activity logs stay folded into details.
+
+The skin tab order is Characters / Knives / Guns / Inventory. Apply atomically saves each selection to %LOCALAPPDATA%\CiyE\BloodStrike\skin_inventory.bin. Inventory preserves history and marks the latest skin per hero/weapon group as Selected; reselecting a historical entry updates recency. Apply and Remove are explicit row actions. Search includes saved entries, even without a loaded catalog. Auto apply follows the existing global switch and queues only matching loaded combat equipment, including subsequent matches and training. If melee categories overlap, the most recently selected compatible knife wins. Inventory is a list of the user's choices, not a claim that the account owns those items. Read/write failures remain visible and never overwrite a damaged file with defaults.
+
+Shared visual tokens and widgets live in bs-cheat/src/ui_theme.h. This pass changes presentation only; runtime, injection and kernel/driver implementation are outside the change. User requested source edits without building or launching a new executable. The screenshots from the earlier pass are historical and do not validate this pass.
