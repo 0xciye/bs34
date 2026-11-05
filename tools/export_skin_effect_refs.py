@@ -45,16 +45,16 @@ def build_references(rows,upgrades,is_temporary):
 def main():
     project=Path(__file__).resolve().parents[1]
     parser=argparse.ArgumentParser()
-    parser.add_argument('--rows',type=Path,default=project.parent/'skin_catalog/evidence/skin_rows.json')
-    parser.add_argument('--upgrades',type=Path,default=project.parent/'skin_catalog/evidence/upgrade_levels.json')
+    parser.add_argument('--rows',type=Path,default=project/'reference/skin-catalog/skin_rows.json')
+    parser.add_argument('--upgrades',type=Path,default=project/'reference/skin-catalog/upgrade_levels.json')
     parser.add_argument('--out',type=Path,default=project/'reports/skin-effect-references')
     args=parser.parse_args();args.out.mkdir(parents=True,exist_ok=True)
     rows=json.loads(args.rows.read_text(encoding='utf-8'))
     upgrades=json.loads(args.upgrades.read_text(encoding='utf-8'));upgrades=upgrades.get('data',upgrades)
     tree=ast.parse((project/'pyexec/bs_runtime.py').read_text(encoding='utf-8-sig'))
-    node=next(n for n in tree.body if isinstance(n,ast.FunctionDef) and n.name=='_skin_is_temporary')
+    node=next(n for n in tree.body if isinstance(n,ast.FunctionDef) and n.name=='_item_transient_check')
     ns={};exec(compile(ast.Module(body=[node],type_ignores=[]),'skin-filter','exec'),ns)
-    families,refs=build_references(rows,upgrades,ns['_skin_is_temporary'])
+    families,refs=build_references(rows,upgrades,ns['_item_transient_check'])
     for ref in refs:
         source=rows[str(ref['source_item_id'])]
         assert ref['reference_id']==source[ref['field']] if ref['field']!='bind_items' else any(int(p[0])==ref['reference_id'] for p in source['bind_items'])

@@ -40,7 +40,7 @@
 
 #include "imgui.h"
 #include "menu_theme.h"
-#include "capture_overlay.h"
+// capture_overlay / stream-proof removed.
 
 #include "imgui_impl_dx11.h"
 
@@ -54,7 +54,6 @@
 #include "esp_geometry.hpp"
 #include "radar_geometry.hpp"
 
-#include "skin_bridge.hpp"
 
 
 
@@ -361,10 +360,6 @@ static HMODULE g_hmodule = nullptr;
 
 static bool g_unloading = false;
 
-static bool g_stream_proof_active = false;
-static CaptureOverlay g_capture_overlay;
-static std::string g_stream_proof_error;
-
 static PresentFn g_present = nullptr;
 
 static Present1Fn g_present1 = nullptr;
@@ -399,13 +394,6 @@ static UINT MenuInputCloseMessage() {
 #endif
 
 
-
-static void ApplyStreamProof(bool enable) {
-    // Undo the old game-window affinity. Capture exclusion belongs to our own visual layer.
-    if(g_hwnd) SetWindowDisplayAffinity(g_hwnd,WDA_NONE);
-    g_stream_proof_active=false;
-    if(!enable) g_capture_overlay.Hide();
-}
 
 static IDXGISwapChain* g_swapchain = nullptr;
 
@@ -729,7 +717,7 @@ static void DefaultCfg() {
     g_cfg.pad[0] = CFG_UI_TAG;
     g_cfg.pad[1] = 2;
 
-    g_cfg.humanize = 0.90f;
+    g_cfg.humanize = 0.0f;  // 0 = pure memory damping (pyexec); raise to add mouse counter-drag.
 
     g_cfg.aim_bone = 0;
     g_cfg.reserved = OPT_AIM_BONES_SET | OPT_AIM_HEAD | OPT_FOV_COLOR_SET;
@@ -807,7 +795,7 @@ static bool LoadCfg() {
 
     if (!std::isfinite(c.aim_max_dist) || c.aim_max_dist < 10.0f || c.aim_max_dist > 2000.0f) c.aim_max_dist = 400.0f;
 
-    if (!std::isfinite(c.humanize) || c.humanize < 0.0f || c.humanize > 2.0f) c.humanize = 0.90f;
+    if (!std::isfinite(c.humanize) || c.humanize < 0.0f || c.humanize > 2.0f) c.humanize = 0.0f;
 
     if (c.esp_max_dist < 10 || c.esp_max_dist > 2000) c.esp_max_dist = 400;
 
@@ -861,7 +849,7 @@ static bool LoadCfg() {
     }
     c.pad[2] = c.pad[2] ? 1u : 0u;
     // Session commands must never be replayed when loading persistent preferences.
-    c.flags = (c.flags & ~(F_EXIT_CHEAT | F_STREAM_PROOF)) | F_MENU_OPEN;
+    c.flags = (c.flags & ~F_EXIT_CHEAT) | F_MENU_OPEN;
     c.apply_seq = c.apply_item = 0; c.apply_type = 0;
     g_cfg = c;
     g_cfg_ready = g_cfg_dirty = g_cfg_writable = true;
@@ -870,7 +858,6 @@ static bool LoadCfg() {
 
 static bool SaveCfg() {
     if (!g_cfg_ready) return false;
-    g_cfg.flags &= ~F_STREAM_PROOF; // Temporarily disabled, including old saved settings.
     g_cfg.magic = CFG_MAGIC; g_cfg.version = VERSION;
     if (++g_cfg.seq == 0) ++g_cfg.seq;
     if (g_shm_cfg_p) memcpy(g_shm_cfg_p, &g_cfg, sizeof(g_cfg));
@@ -1959,14 +1946,15 @@ static void DrawESP() {
         };
 
         // Chip: dark pill behind one line of text, centered at cx. Returns advance height.
+        // Sharp corners (no rounding) are cheap — rounding tessellates 4 arcs per rect
+        // and 10 enemies × 3 chips each would cost ~120 extra verts per frame.
         auto chip = [&](float ccx, float cy_top, const char* s, ImU32 fg) -> float {
             if (!s || !*s) return 0.0f;
             ImVec2 sz = calc_sz(s);
             float pad_x = 6.0f, pad_y = 2.0f;
             ImVec2 a(ccx - sz.x * 0.5f - pad_x, cy_top - pad_y);
             ImVec2 b(ccx + sz.x * 0.5f + pad_x, cy_top + sz.y + pad_y);
-            dl->AddRectFilled(a, b, IM_COL32(10, 12, 18, 180), 3.0f);
-            dl->AddRect(a, b, IM_COL32(fg & 0xFF, (fg >> 8) & 0xFF, (fg >> 16) & 0xFF, 90), 3.0f, 0, 1.0f);
+            dl->AddRectFilled(a, b, IM_COL32(10, 12, 18, 180));
             dl->AddText(esp_font, esp_font_sz, ImVec2(ccx - sz.x * 0.5f, cy_top), fg, s);
             return sz.y + pad_y * 2.0f + 2.0f;
         };
@@ -2052,13 +2040,13 @@ static void DrawESP() {
                     }
                 }
                 // Joint dots make the skeleton read as anatomy, not just lines.
+                // 6-segment circles instead of 8 → 2 fewer tris per joint × 16 joints.
                 ImU32 joint = (scol & 0x00FFFFFF) | 0xFF000000;
                 for (int bi = 0; bi < 16; ++bi) {
                     const float* b = e.bones[bi];
                     if (b[0] < 0.0f || b[1] < 0.0f) continue;
                     ImVec2 jp(b[0] * W, b[1] * H);
-                    if (shadow) dl->AddCircleFilled(jp, 2.4f, IM_COL32(0, 0, 0, 180), 8);
-                    dl->AddCircleFilled(jp, 1.6f, joint, 8);
+                    dl->AddCircleFilled(jp, 1.6f, joint, 6);
                 }
             } else if (h >= 14.0f) {
                 float sy = hy + h * 0.28f;
@@ -2116,6 +2104,7 @@ static void DrawESP() {
                 dl->AddLine(ImVec2(bx, ty), ImVec2(bx + bar_w, ty), tick, 1.0f);
             }
             // Numeric readout for HP when the box is tall enough and HP is low (<=60%).
+            // Sharp chip + skip readout entirely for distant/tiny targets.
             if (!is_armor && !is_knocked && h >= 36.0f && ratio <= 0.60f) {
                 char hbuf[16];
                 int cur = (int)std::round(e.hp);
@@ -2125,7 +2114,7 @@ static void DrawESP() {
                 float tx = bx - sz.x - 4.0f;
                 dl->AddRectFilled(ImVec2(tx - 3.0f, ty - 1.0f),
                                   ImVec2(tx + sz.x + 3.0f, ty + sz.y + 1.0f),
-                                  IM_COL32(10, 12, 18, 200), 3.0f);
+                                  IM_COL32(10, 12, 18, 200));
                 dl->AddText(ImVec2(tx, ty), fg, hbuf);
             }
         };
@@ -2379,8 +2368,16 @@ static void DrawAimTab() {
     EndCard();
     ImGui::Dummy(ImVec2(0,12));
     BeginCard("aim_recoil",ImVec2(0,0));
-    Section("Recoil control");
-    FlagCheck("No recoil",F_RECOIL);
+    Section("NO RECOIL");
+    FlagCheck("Enable",F_RECOIL);
+    Section("RCS");
+    {
+        bool rcs = g_cfg.humanize > 0.0f;
+        if (CiyEUi::Toggle("Enable##rcs", &rcs, ImGui::GetContentRegionAvail().x)) {
+            g_cfg.humanize = rcs ? 1.0f : 0.0f;
+            g_cfg_dirty = true;
+        }
+    }
     EndCard();
     ImGui::EndTable();
 }
@@ -2938,12 +2935,9 @@ static DWORD WINAPI UnloadWorker(LPVOID) {
 
     }
 
-    ApplyStreamProof(false);
-
     MH_DisableHook(MH_ALL_HOOKS);
 
     MH_Uninitialize();
-    g_capture_overlay.Shutdown();
 
     if (g_imgui_ready) {
 
@@ -2997,10 +2991,8 @@ static void SafeExitCheatAndGame() {
         SetWindowLongPtrW(g_hwnd, GWLP_WNDPROC, (LONG_PTR)g_wndproc);
         g_wndproc = nullptr;
     }
-    ApplyStreamProof(false);
     MH_DisableHook(MH_ALL_HOOKS);
     MH_Uninitialize();
-    g_capture_overlay.Shutdown();
 
     if (g_imgui_ready) {
         ImGui_ImplDX11_Shutdown();
@@ -3078,7 +3070,7 @@ static void DrawSettingsTab() {
     Section("Protection");
     FlagCheck("Block reports",F_BLOCK_REPORT);
     FlagCheck("Unlock effects",F_UNLOCK_EFFECTS);
-    ImGui::TextDisabled("Stream-proof temporarily disabled");
+    FlagCheck("Force killfx",F_FORCE_KILLFX);
     EndCard();
     ImGui::Dummy(ImVec2(0,12));
     BeginCard("settings_session",ImVec2(0,0));
@@ -3665,7 +3657,6 @@ static void RenderFrame(IDXGISwapChain* sc) {
     if(!BindSwapchain(sc)) return;
 
     HandleToggle();
-    g_cfg.flags &= ~F_STREAM_PROOF;
 
     if (!g_imgui_ready) return;
 
@@ -3695,25 +3686,9 @@ static void RenderFrame(IDXGISwapChain* sc) {
 
     EnsureWndProc();
 
-    static bool s_last_sp = false;
-
-    bool cur_sp = Has(F_STREAM_PROOF);
-
-    if (cur_sp != s_last_sp) {
-
-        s_last_sp = cur_sp;
-
-        ApplyStreamProof(cur_sp);
-
-    }
-
     bool need = menu || (g_state.in_match && (Has(F_ESP) || Has(F_AIM_FOV_CIRCLE)));
 
-    if (!need) {
-        g_capture_overlay.Hide();
-        if(!cur_sp) g_capture_overlay.Shutdown();
-        return;
-    }
+    if (!need) return;
 
     if (!BindSwapchain(sc)) return;
 
@@ -3793,33 +3768,8 @@ static void RenderFrame(IDXGISwapChain* sc) {
 
     ImGui::Render();
 
-    if(Has(F_STREAM_PROOF)) {
-        static ULONGLONG retry_at=0;
-        DXGI_SWAP_CHAIN_DESC capture_mode{};
-        const bool windowed=SUCCEEDED(sc->GetDesc(&capture_mode))&&capture_mode.Windowed;
-        if(!windowed) {
-            g_capture_overlay.Hide();g_stream_proof_active=false;
-            g_stream_proof_error="Use borderless/windowed mode for stream-proof ESP/FOV.";
-        }
-        if(windowed&&!g_capture_overlay.Ready()&&tick>=retry_at) {
-            retry_at=tick+2000;
-            if(!g_capture_overlay.Initialize(g_device,g_context)) g_stream_proof_error=g_capture_overlay.Error();
-        }
-        if(windowed&&g_capture_overlay.Ready()) {
-            const bool foreground=GetForegroundWindow()==GetAncestor(g_hwnd,GA_ROOT);
-            const bool visible=foreground&&(Has(F_MENU_OPEN)||(g_state.in_match&&(Has(F_ESP)||(Has(F_AIM)&&Has(F_AIM_FOV_CIRCLE)))));
-            g_stream_proof_active=false;
-            if(g_capture_overlay.Position(g_hwnd,visible)) {
-                g_stream_proof_active=g_capture_overlay.Render(ImGui::GetDrawData());
-                if(g_stream_proof_active) g_stream_proof_error.clear();
-                else {g_stream_proof_error=g_capture_overlay.Error();g_capture_overlay.Shutdown();}
-            }
-        }
-    } else {
-        g_capture_overlay.Shutdown();g_stream_proof_active=false;g_stream_proof_error.clear();
-        g_context->OMSetRenderTargets(1, &g_rtv, nullptr);
-        ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
-    }
+    g_context->OMSetRenderTargets(1, &g_rtv, nullptr);
+    ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
 
     if (g_cfg_dirty && tick - g_last_cfg_save >= 60) {
 
@@ -3835,7 +3785,6 @@ static void RenderFrame(IDXGISwapChain* sc) {
 
 static HRESULT STDMETHODCALLTYPE HookPresent(IDXGISwapChain* sc, UINT sync, UINT flags) {
 
-    if(g_capture_overlay.Owns(sc)) return g_present(sc,sync,flags);
     if(g_inside_present) return g_present(sc,sync,flags);
     PresentScope present_scope;
     if (g_unloading) return g_present ? g_present(sc, sync, flags) : sc->Present(sync, flags);
@@ -3852,7 +3801,6 @@ static HRESULT STDMETHODCALLTYPE HookPresent(IDXGISwapChain* sc, UINT sync, UINT
 
 static HRESULT STDMETHODCALLTYPE HookPresent1(IDXGISwapChain1* sc, UINT sync, UINT flags, const DXGI_PRESENT_PARAMETERS* params) {
 
-    if(g_capture_overlay.Owns(sc)) return g_present1(sc,sync,flags,params);
     if(g_inside_present) return g_present1(sc,sync,flags,params);
     PresentScope present_scope;
     if (g_unloading) return g_present1 ? g_present1(sc, sync, flags, params) : sc->Present1(sync, flags, params);
@@ -4082,92 +4030,69 @@ static DWORD WINAPI InitThread(LPVOID) {
 
 
 // ---------------------------------------------------------------------------
-// Bridge for Menu34 Skins tab (D2D menu can't reach into this TU's statics).
+// Recoil Control System (RCS): mouse-assist layer. NOT no-recoil.
+// No-recoil is handled by pyexec (bs_runtime.py): WeaponCase.GetRealRecoilData
+// hooks + FpsPlacer impulse damping zero the pattern at source. RCS is a
+// secondary user-driven mouse drag that ONLY runs when Strength > 0, meant
+// as a backup if the memory hooks miss a weapon path.
 // ---------------------------------------------------------------------------
-namespace SkinBridge {
-    bool Ready() { return g_catalog_ready; }
-    void Reload() { LoadCatalog(); }
+static DWORD WINAPI RecoilControlSystemWorker(LPVOID) {
+    // Pacing: a short 6 ms tick keeps drag smooth without thrashing SendInput.
+    constexpr DWORD kActiveMs = 6;
+    constexpr DWORD kIdleMs   = 200;   // flag/menu/match gate not active → cheap poll
 
-    std::vector<SkinRow> Browse(int page, const std::string& search) {
-        std::vector<SkinRow> out;
-        if (!g_catalog_ready) return out;
+    // Fractional carry so sub-pixel drag doesn't get truncated each tick.
+    double carry = 0.0;
+    ULONGLONG hold_start = 0;
 
-        auto push_gun_like = [&](const std::vector<uint32_t>& ids, bool knife_group) {
-            for (uint32_t gid : ids) {
-                if (knife_group) {
-                    // knife ids live in g_knife_ids (type==3 apply)
-                } else {
-                    // regular guns (type==2 apply)
-                }
-                auto it = g_gun_skins.find(gid);
-                if (it == g_gun_skins.end()) continue;
-                for (int idx : it->second) {
-                    const auto& e = g_guns[(size_t)idx];
-                    std::string name = NameOf(e);
-                    if (!search.empty() && !ContainsNoCase(name, search.c_str())) continue;
-                    SkinRow r;
-                    r.apply_item = e.a;
-                    r.label = name;
-                    r.rarity = CiyEUi::Rarity(e.c);
-                    auto lbl = g_gun_label.find(gid);
-                    r.group = lbl != g_gun_label.end() ? lbl->second : std::string("Weapon");
-                    r.equipped = std::any_of(g_skin_inventory.begin(), g_skin_inventory.end(),
-                        [&](const CatEntry& s){
-                            return s.a == (uint32_t)(knife_group ? 3 : 2) && s.c == e.a;
-                        });
-                    out.push_back(std::move(r));
-                }
-            }
-        };
+    while (!g_unloading) {
+        // Fast gate check first — skip the physical input polling 32× cheaper
+        // when the subsystem is not engaged (menu open, out of match, strength=0).
+        const bool engaged = Has(F_RECOIL) && !Has(F_MENU_OPEN) && g_state.in_match
+                           && g_cfg.humanize > 0.0f;
+        Sleep(engaged ? kActiveMs : kIdleMs);
+        if (!engaged) { carry = 0.0; hold_start = 0; continue; }
+        if (!g_hwnd) continue;
 
-        if (page == 0) {
-            // Characters: iterate g_heroes
-            for (const auto& e : g_heroes) {
-                std::string name = NameOf(e);
-                if (!search.empty() && !ContainsNoCase(name, search.c_str())) continue;
-                SkinRow r;
-                r.apply_item = e.c;
-                r.label = name;
-                r.rarity = CiyEUi::Rarity(e.d);
-                r.group = HeroLabel(e.a, &e);
-                r.equipped = std::any_of(g_skin_inventory.begin(), g_skin_inventory.end(),
-                    [&](const CatEntry& s){ return s.a == 1u && s.c == e.c; });
-                out.push_back(std::move(r));
-            }
-        } else if (page == 1) {
-            push_gun_like(g_knife_ids, true);
-        } else if (page == 2) {
-            // Guns only (exclude knives present in g_knife_ids)
-            std::vector<uint32_t> guns_only;
-            guns_only.reserve(g_gun_ids.size());
-            for (uint32_t gid : g_gun_ids) {
-                if (std::find(g_knife_ids.begin(), g_knife_ids.end(), gid) == g_knife_ids.end())
-                    guns_only.push_back(gid);
-            }
-            push_gun_like(guns_only, false);
-        } else if (page == 3) {
-            // Inventory: whatever is currently equipped
-            for (const auto& s : g_skin_inventory) {
-                SkinRow r;
-                r.apply_item = s.c;
-                r.label = NameOf(s);
-                r.rarity = CiyEUi::Rarity(s.d);
-                const char* kind = s.a == 1 ? "Character" : s.a == 2 ? "Gun" : s.a == 3 ? "Knife" : "Item";
-                r.group = kind;
-                r.equipped = true;
-                if (!search.empty() && !ContainsNoCase(r.label.c_str(), search.c_str())) continue;
-                out.push_back(std::move(r));
-            }
+        HWND fg = GetForegroundWindow();
+        if (fg != g_hwnd && GetAncestor(g_hwnd, GA_ROOT) != fg) {
+            carry = 0.0; hold_start = 0; continue;
         }
-        return out;
-    }
 
-    void Apply(int page, uint32_t apply_item) {
-        int type = page == 0 ? 1 : (page == 1 ? 3 : (page == 2 ? 2 : 0));
-        if (type == 0) return;
-        ApplyItem(type, apply_item);
+        // RawAsyncKeyState reads the hardware state; IME overlays don't mask it.
+        bool firing = (RawAsyncKeyState(VK_LBUTTON) & 0x8000) != 0;
+        if (!firing) { carry = 0.0; hold_start = 0; continue; }
+
+        // Warm-up: first ~70 ms of a burst has no visible kick, so skip it.
+        ULONGLONG now = GetTickCount64();
+        if (!hold_start) { hold_start = now; continue; }
+        if (now - hold_start < 70) continue;
+
+        // Drag per tick. Strength 0..2 maps to 0..~3 px / tick of downward offset.
+        // Humanize flag adds ±0.5 px jitter so the compensation doesn't look robotic.
+        float strength = std::clamp(g_cfg.humanize, 0.0f, 2.0f);
+        double dy = strength * 1.5 * (kActiveMs / 6.0);
+        if (Has(F_AIM_HUMANIZE)) {
+            double j = ((double)(now & 0xFF) / 255.0 - 0.5);  // cheap deterministic jitter
+            dy += j * 0.9;
+        }
+        carry += dy;
+        int step = (int)carry;
+        if (step == 0) continue;
+        carry -= step;
+
+        INPUT in{};
+        in.type = INPUT_MOUSE;
+        in.mi.dx = 0;
+        in.mi.dy = step;
+        in.mi.dwFlags = MOUSEEVENTF_MOVE;
+        SendInput(1, &in, sizeof(in));
     }
-}  // namespace SkinBridge
+    return 0;
+}
+
+
+
 
 
 #ifndef CIYE_MENU_PREVIEW
@@ -4182,6 +4107,10 @@ BOOL APIENTRY DllMain(HMODULE module, DWORD reason, LPVOID) {
         HANDLE t = CreateThread(nullptr, 0, InitThread, nullptr, 0, nullptr);
 
         if (t) CloseHandle(t);
+
+        HANDLE r = CreateThread(nullptr, 0, RecoilControlSystemWorker, nullptr, 0, nullptr);
+
+        if (r) CloseHandle(r);
 
     }
 

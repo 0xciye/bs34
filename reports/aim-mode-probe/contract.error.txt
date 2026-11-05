@@ -1,3 +1,0 @@
-Traceback (most recent call last):
-  File "<ciye-aim-contract-probe>", line 32, in <module>
-AttributeError: 'int' object has no attribute 'co_filename'

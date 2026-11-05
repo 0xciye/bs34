@@ -93,10 +93,10 @@ IDX_COL_HEADDOT = 28
 IDX_COL_COUNT = 29
 IDX_RENDER_STYLE = 30
 IDX_BOX_THICK = 31
-IDX_SKIN_HERO = 32
-IDX_SKIN_GUN = 33
-IDX_SKIN_KNIFE = 34
-IDX_AUTO_SKIN = 35
+IDX_THEME_HERO = 32
+IDX_THEME_GUN = 33
+IDX_THEME_KNIFE = 34
+IDX_AUTO_THEME = 35
 IDX_COL_ARMOR = 36
 
 OPT_TRACK_TOGGLE = 1 << 0
@@ -130,14 +130,14 @@ F_TRACK_LEAD = 1 << 18
 F_RENDER_SHIELD = 1 << 19
 F_UNLOCK_EFFECTS = 1 << 20
 F_BLOCK_REPORT = 1 << 21
-F_SKIN_CURRENT = 1 << 22
+F_THEME_PRESERVE = 1 << 22
 F_DAMP_IMPULSE = 1 << 23
-F_STREAM_PROOF = 1 << 25
+F_FORCE_KILLFX = 1 << 25
 F_EXIT_CHEAT = 1 << 26
 
 DEFAULT_FLAGS = (F_MENU_OPEN | F_RENDER_ENTITIES | F_RENDER_BOUNDS | F_RENDER_LABEL | F_RENDER_RANGE |
                  F_RENDER_VITALITY | F_RENDER_SHIELD | F_RENDER_HEAD_MARKER | F_TRACK_FOV_INDICATOR |
-                 F_UNLOCK_EFFECTS | F_BLOCK_REPORT | F_SKIN_CURRENT |
+                 F_UNLOCK_EFFECTS | F_BLOCK_REPORT | F_THEME_PRESERVE |
                  F_DAMP_IMPULSE | F_RENDER_SUMMARY | (1 << 27) | (1 << 28) | (1 << 29) | (1 << 30))
 
 DEFAULT_CFG = (
@@ -200,7 +200,7 @@ _diag_t = 0.0
 _ent_list_cache = None
 _apply_tries = 0
 _apply_seq_seen = -1
-_skin_diag = set()
+_asset_diag = set()
 _hooks_done = False
 _hook_avatar_id = None
 _booted = False
@@ -213,12 +213,12 @@ _unlock_changed = 0
 _wrapped_preds = set()
 _last_unlock = 0.0
 _my_gen = 0
-_skin_auto_seen = None
-_skin_task = []
-_skin_task_t = 0.0
-_skin_fail = {}
-_skin_last_reapply = 0.0
-_skin_respect_current = False
+_asset_auto_seen = None
+_appearance_task = []
+_appearance_task_t = 0.0
+_appearance_fail = {}
+_asset_last_sync = 0.0
+_asset_preserve_active = False
 
 _cfg_cache_vals = DEFAULT_CFG
 _cfg_cache_mtime = -1
@@ -816,7 +816,7 @@ def _index_item_templates():
     _model_to_hero.clear()
     for proto in lobby.data.values():
         try:
-            if _skin_is_temporary(proto):
+            if _item_transient_check(proto):
                 continue
             iid = int(proto['id'])
             subtype = int(proto.get('sub_type') or 0)
@@ -857,7 +857,8 @@ def _index_item_templates():
                 guns[catalog_key] = (tid, gid, int(proto['quality']), 1 if typ == 2 else 2, _bytes(label, 48))
         except (KeyError, TypeError, ValueError):
             continue
-    _skin_selection.template_items = template_items
+    _resolve_asset_variant.template_items = template_items
+    _resolve_asset_variant.template_revision = (id(lobby.data), len(lobby.data))
     hero_rows = sorted(heroes.values())[:MAX_HERO]
     gun_rows = sorted(guns.values(), key=lambda row: (row[1], -row[2], row[0]))[:MAX_GUN]
     buf = bytearray(CAT_HEAD_SIZE + (len(hero_rows) + len(gun_rows)) * CAT_ENTRY_SIZE)
@@ -2939,6 +2940,106 @@ def _restore_impulse_state():
                 delattr(placer, name)
 
 
+# ---------------------------------------------------------------------------
+# No-recoil (recoil-probe 2026-11-05): hook WeaponCase class methods at source.
+# Zeroing GetRealRecoilData / GetRealRecoilRandomData / GetRealRollShakeInfo
+# triggers the FSM but with zero pattern/random/shake values, so the camera
+# easing in StateRecoil.RecoilUp rotates to no offset. Keeps return shape so
+# we don't break downstream consumers that expect tuples or objects.
+# ---------------------------------------------------------------------------
+_wc_damp_hooks = None  # (cls, [(name, wrapper, had_class_attr, original_attr), ...])
+
+_IMPULSE_FIELD_KEYS = ('yaw', 'pitch', 'range', 'shake', 'roll', 'power',
+                     'amount', 'strength', 'magnitude', 'intensity', 'force')
+# Per-type cache so each recoil-data class pays introspection cost ONCE.
+_impulse_field_cache = {}
+
+def _suppress_impulse_metric(result):
+    if result is None:
+        return result
+    t = type(result)
+    if t is float: return 0.0
+    if t is int:   return 0
+    if t is tuple:
+        # Hot path: pattern/random data is almost always a 2-tuple of floats.
+        return (0.0,) * len(result)
+    if t is list:
+        return [0.0] * len(result)
+    # Object. Use cached field list; build once per type.
+    names = _impulse_field_cache.get(t)
+    if names is None:
+        try:
+            vd = vars(result)
+            names = tuple(n for n in vd
+                          if not n.startswith('_') and any(k in n.lower() for k in _IMPULSE_FIELD_KEYS))
+        except Exception:
+            names = ()
+        _impulse_field_cache[t] = names
+    for n in names:
+        try:
+            v = getattr(result, n, None)
+            if type(v) is float: setattr(result, n, 0.0)
+            elif type(v) is int: setattr(result, n, 0)
+        except Exception:
+            pass
+    return result
+
+
+def _sync_weapon_case_damping(cfg, in_match):
+    """Install/remove class-level hooks on WeaponCase so every weapon returns
+    zero recoil pattern + zero random bounds + zero roll shake."""
+    global _wc_damp_hooks
+    want = bool(in_match) and _flag(cfg, F_DAMP_IMPULSE)
+
+    if not want:
+        if _wc_damp_hooks is not None:
+            cls, hooks = _wc_damp_hooks
+            for name, wrapper, had_attr, original in reversed(hooks):
+                if getattr(cls, name, None) is wrapper:
+                    if had_attr:
+                        setattr(cls, name, original)
+                    else:
+                        try: delattr(cls, name)
+                        except Exception: pass
+            _wc_damp_hooks = None
+        return
+
+    if _wc_damp_hooks is not None:
+        return  # already installed
+
+    try:
+        import gclient.gameplay.logic_base.equips.weapon_case as wc_mod
+    except Exception:
+        return
+    cls = getattr(wc_mod, 'WeaponCase', None)
+    if cls is None:
+        return
+    targets = ('GetRealRecoilData',
+               'GetRealRecoilRandomData',
+               'GetRealRollShakeInfo',
+               'GetRealPersistRecoilDownTimeMax')
+    hooks = []
+    for name in targets:
+        original = getattr(cls, name, None)
+        if not callable(original):
+            continue
+        had_attr = name in cls.__dict__
+        def make_wrap(orig, lbl):
+            def wrapper(self, *args, **kwargs):
+                result = orig(self, *args, **kwargs)
+                return _suppress_impulse_metric(result)
+            wrapper._m_recoil_orig = orig
+            return wrapper
+        wrapper = make_wrap(original, name)
+        try:
+            setattr(cls, name, wrapper)
+            hooks.append((name, wrapper, had_attr, original))
+        except Exception:
+            continue
+    _wc_damp_hooks = (cls, hooks)
+    _sys_log('[recoil] weapon_case hooks installed=%d targets=%d' % (len(hooks), len(targets)))
+
+
 def _sync_impulse_damping(cfg, in_match):
     global _impulse_hooks
     placer = _get_placer() if in_match and _flag(cfg, F_DAMP_IMPULSE) else None
@@ -3243,13 +3344,13 @@ def _call_path(obj, names, variants):
     return ''
 
 
-def _skin_is_temporary(proto):
+def _item_transient_check(proto):
     params = proto.get('use_code_params') or {}
     return bool(params.get('use_time') or proto.get('end_time') or
                 proto.get('limited_item_time') or proto.get('use_code') == 'PlaceholderItem')
 
 
-def _skin_entity():
+def _target_mesh_avatar():
     if bool(getattr(genv, 'is_in_hall', True)):
         return None
     player = getattr(genv, 'player', None)
@@ -3269,7 +3370,7 @@ def _skin_entity():
     return None
 
 
-def _skin_case_is_melee(case):
+def _slot_is_melee_profile(case):
     for cls in type(case).__mro__:
         if cls.__name__ in ('MeleeCase', 'DualMeleeCase', 'HeirloomCase'):
             return True
@@ -3277,7 +3378,7 @@ def _skin_case_is_melee(case):
     return bool(value() if callable(value) else value)
 
 
-def _skin_case_gun_id(case):
+def _slot_weapon_identifier(case):
     gid = int(getattr(case, 'gun_id', 0) or 0)
     if gid:
         return gid
@@ -3290,7 +3391,7 @@ def _skin_case_gun_id(case):
     return 0
 
 
-def _skin_selection(selection, typ):
+def _resolve_asset_variant(selection, typ):
     import gclient.data.lobby_item_data as lobby
     import gclient.data.gun_skin_template_data as gun
     wanted = (510, 520, 530, 540, 550, 560) if typ == 2 else (201, 202, 203, 206, 207, 210)
@@ -3298,38 +3399,202 @@ def _skin_selection(selection, typ):
     template_id = 0
     if item is not None:
         if int(item.get('sub_type') or 0) not in wanted:
-            raise ValueError('selected item does not belong to this skin category')
-        if _skin_is_temporary(item):
+            raise ValueError('selected item does not belong to this category')
+        if _item_transient_check(item):
             raise ValueError('selected item is temporary or a placeholder')
         template_id = int((item.get('guise') or {}).get('template_id') or 0)
     else:
         template_id = int(selection)
-        cached = getattr(_skin_selection, 'template_items', {})
-        item = cached.get((typ, template_id))
-        if item is None:
+        revision = (id(lobby.data), len(lobby.data))
+        if getattr(_resolve_asset_variant, 'template_revision', None) != revision:
+            _resolve_asset_variant.template_items = {}
+            _resolve_asset_variant.template_revision = revision
+        cached = _resolve_asset_variant.template_items
+        key = (typ, template_id)
+        if key not in cached:
+            item = None
             for candidate in lobby.data.values():
-                if int(candidate.get('sub_type') or 0) not in wanted or _skin_is_temporary(candidate):
+                if int(candidate.get('sub_type') or 0) not in wanted or _item_transient_check(candidate):
                     continue
                 if int((candidate.get('guise') or {}).get('template_id') or 0) != template_id:
                     continue
                 if item is None or int(candidate['id']) < int(item['id']):
                     item = candidate
-            if item is not None:
-                cached[(typ, template_id)] = item
-                _skin_selection.template_items = cached
+            # Missing saved templates must not rescan the catalog every tick.
+            cached[key] = item
+        item = cached[key]
     if item is None or not template_id:
-        raise ValueError('no permanent skin item matches the selected template')
+        raise ValueError('no permanent item matches the selected template')
     template = gun.data.get(template_id)
     if template is None:
-        raise ValueError('skin template is missing')
+        raise ValueError('item template is missing')
     if int(item.get('sub_type') or 0) == 210:
         raise ValueError('Artifact requires blade/handle/core/effect attributes; a template ID alone is insufficient')
     return item, template, template_id
 
 
+_visual_fx_bindings = {}
+
+
+def _resolve_visual_descriptor(info, caster_id=None, weapon_hint=None):
+    if not hasattr(info, 'get'):
+        return info
+    local_id = getattr(getattr(genv, 'player', None), 'id', None)
+    caster = info.get('caster_id') or info.get('killer_id') or caster_id
+    if not local_id or str(caster) != str(local_id):
+        return info
+    weapon_id = info.get('weapon_id') or (weapon_hint or {}).get('weapon_id')
+    gun_id = info.get('gun_id')
+    binding = _visual_fx_bindings.get(weapon_id)
+    if binding is None and gun_id:
+        binding = next((b for b in _visual_fx_bindings.values() if b['gun_id'] == gun_id), None)
+    if binding is None:
+        template_id = info.get('guise_template_id')
+        module = sys.modules.get('gclient.data.gun_skin_template_data')
+        template = getattr(module, 'data', {}).get(template_id) or {}
+        gun_id = template.get('gun_id')
+        if gun_id:
+            binding = next((b for b in _visual_fx_bindings.values() if b['gun_id'] == gun_id), None)
+    if (binding is None or binding['space'] is not getattr(genv, 'space', None) or
+            str(binding['owner_id']) != str(local_id)):
+        return info
+    result = dict(info)
+    result.update(guise_item_id=binding['item_id'], guise_template_id=binding['template_id'])
+    if info.get('kill_team_guise_item_id'):
+        result.update(kill_team_guise_item_id=binding['item_id'],
+                      kill_team_guise_template_id=binding['template_id'])
+    return result
+
+
+def _proxy_visual_attribute(original, field):
+    def getter(case):
+        binding = getattr(case, '_m_fx_meta', None)
+        if (binding is not None and binding['space'] is getattr(genv, 'space', None) and
+                str(binding['owner_id']) == str(getattr(getattr(genv, 'player', None), 'id', None)) and
+                binding['template_id'] == getattr(case, 'guise_id', None)):
+            features = sys.modules.get('gclient.data.item_feature_data')
+            templates = sys.modules.get('gclient.data.gun_skin_template_data')
+            feature = getattr(features, 'data', {}).get(binding['item_id']) or {}
+            template = getattr(templates, 'data', {}).get(binding['template_id']) or {}
+            keys = ('fps_tracer_bullet_id', 'fps_adstracer_bullet_id', 'tps_tracer_bullet_id',
+                    'fps_simple_tracer_bullet_id', 'extra_ballistic_tracer_bullet_id') if field == 'bullet_trace' else ('skin_hit_object_effect_id',)
+            return bool(feature.get(field) and any(template.get(k) for k in keys))
+        return original(case)
+    getter.__name__ = original.__name__
+    getter._m_fx_orig = original
+    getter._m_fx_owner = globals()
+    return getter
+
+
+def _proxy_hud_effect(original):
+    def push(component, info, *args, **kwargs):
+        return original(component, _resolve_visual_descriptor(info), *args, **kwargs)
+    push._m_fx_orig = original
+    push._m_fx_owner = globals()
+    return push
+
+
+def _proxy_death_effect(original):
+    def play(model, info, *args, **kwargs):
+        import types
+        owner = getattr(model, 'owner', None)
+        raw = getattr(owner, 'final_kill_info', None)
+        decoder = original.__globals__.get('cPickle')
+        if not raw or decoder is None:
+            return original(model, info, *args, **kwargs)
+        try:
+            decoded = decoder.loads(raw)
+            cooked = _resolve_visual_descriptor(decoded, getattr(owner, 'dead_killer', None), info)
+        except Exception:
+            return original(model, info, *args, **kwargs)
+        if cooked is decoded:
+            return original(model, info, *args, **kwargs)
+        # Isolate decoding for this render call; replicated entity data stays intact.
+        namespace = dict(original.__globals__)
+        namespace['cPickle'] = types.SimpleNamespace(loads=lambda value: cooked if value is raw else decoder.loads(value))
+        render = types.FunctionType(original.__code__, namespace, original.__name__,
+                                    original.__defaults__, original.__closure__)
+        render.__kwdefaults__ = original.__kwdefaults__
+        return render(model, info, *args, **kwargs)
+    play._m_fx_orig = original
+    play._m_fx_owner = globals()
+    return play
+
+
+def _on_elimination_event(original, entity):
+    def callback(caster, *args, **kwargs):
+        case = _current_case(entity)
+        hint = {'weapon_id': getattr(case, 'weapon_id', None)} if case is not None else None
+        return original(_resolve_visual_descriptor(caster, getattr(entity, 'id', None), hint), *args, **kwargs)
+    callback._m_fx_orig = original
+    callback._m_fx_owner = globals()
+    return callback
+
+
+def _install_visual_proxies():
+    module = sys.modules.get('gclient.gameplay.logic_base.equips.weapon_case_base')
+    cls = getattr(module, 'WeaponCaseBase', None)
+    if cls is not None:
+        for name, field in (('show_guise_bullet_trace', 'bullet_trace'), ('show_guise_hit_effect', 'hit_effect')):
+            descriptor = vars(cls).get(name)
+            current = getattr(descriptor, 'func', None)
+            if callable(current) and getattr(current, '_m_fx_owner', None) is not globals():
+                descriptor.func = _proxy_visual_attribute(getattr(current, '_m_fx_orig', current), field)
+    module = sys.modules.get('gclient.gameplay.uicomponents.hud_killrecord_comp')
+    for cls in list(vars(module).values()) if module is not None else ():
+        if not isinstance(cls, type):
+            continue
+        current = vars(cls).get('PushKillRecord')
+        if callable(current) and getattr(current, '_m_fx_owner', None) is not globals():
+            cls.PushKillRecord = _proxy_hud_effect(getattr(current, '_m_fx_orig', current))
+    module = sys.modules.get('gclient.gameplay.logic_base.models.avatar_model')
+    cls = getattr(module, 'AvatarModel', None)
+    current = getattr(cls, 'PlaySkinDeadAnimAndEffect', None)
+    if callable(current) and getattr(current, '_m_fx_owner', None) is not globals():
+        cls.PlaySkinDeadAnimAndEffect = _proxy_death_effect(getattr(current, '_m_fx_orig', current))
+    entity = getattr(genv, 'player', None)
+    for name in ('KillAvatar', 'KnockDownAvatar'):
+        current = getattr(entity, name, None)
+        if callable(current) and getattr(current, '_m_fx_owner', None) is not globals():
+            setattr(entity, name, _on_elimination_event(getattr(current, '_m_fx_orig', current), entity))
+
+
+def _bind_visual_metadata(case, template_id, item_id):
+    binding = {'template_id': template_id, 'item_id': item_id,
+               'gun_id': _slot_weapon_identifier(case), 'space': getattr(genv, 'space', None),
+               'owner_id': getattr(getattr(genv, 'player', None), 'id', None)}
+    previous = getattr(case, '_m_fx_meta', None)
+    extra = getattr(case, 'extra', None)
+    if (previous == binding and int(getattr(case, 'guise_item_id', 0) or 0) == item_id and
+            (extra is None or extra.get('guise_item_id') == item_id)):
+        return
+    case._m_fx_meta = binding
+    try:
+        case.guise_item_id = item_id
+        if extra is not None:
+            extra['guise_item_id'] = item_id
+        clear = getattr(case, 'ClearGuiseItemCache', None)
+        if callable(clear):
+            clear()
+        init = getattr(case, 'InitFpsProperty', None)
+        if callable(init) and getattr(case, 'is_fps_weapon', False):
+            init()
+        refresh = getattr(case, 'RefreshRacerForChangeGuise', None)
+        if callable(refresh):
+            refresh()
+    except Exception:
+        case._m_fx_meta = None
+        raise
+    if _visual_fx_bindings:
+        prior = next(iter(_visual_fx_bindings.values()))
+        if prior['space'] is not binding['space'] or prior['owner_id'] != binding['owner_id']:
+            _visual_fx_bindings.clear()
+    _visual_fx_bindings[int(getattr(case, 'weapon_id', 0) or binding['gun_id'])] = binding
+
+
 def _update_model_appearance(entity, item, typ):
     try:
-        selected, template, template_id = _skin_selection(int(item), int(typ))
+        selected, template, template_id = _resolve_asset_variant(int(item), int(typ))
         gid = int(template.get('gun_id') or 0)
         cases = []
         for case in _all_cases(entity):
@@ -3337,13 +3602,13 @@ def _update_model_appearance(entity, item, typ):
                 continue
             if not bool(getattr(case, 'is_in_combat', False)):
                 continue
-            if _skin_case_is_melee(case) != (typ == 3):
+            if _slot_is_melee_profile(case) != (typ == 3):
                 continue
-            if typ == 2 and _skin_case_gun_id(case) != gid:
+            if typ == 2 and _slot_weapon_identifier(case) != gid:
                 continue
             cases.append(case)
         if typ == 2 and gid <= 0:
-            raise ValueError('selected gun skin has no gun_id')
+            raise ValueError('selected item has no gun_id')
         if not cases:
             raise ValueError('matching combat weapon case is not loaded; equip the selected weapon first')
         expected_equip = int(template.get('replace_equip_id') or 0)
@@ -3354,6 +3619,7 @@ def _update_model_appearance(entity, item, typ):
                 current = getattr(case, 'equip_proto', None) or {}
                 if not target.get('equip_case') or target.get('equip_case') != current.get('equip_case'):
                     raise ValueError('selected melee skin requires a different weapon class; equip that melee class first')
+        _install_visual_proxies()
         accepted = 0
         for case in cases:
             item_id = int(selected['id'])
@@ -3362,10 +3628,11 @@ def _update_model_appearance(entity, item, typ):
                 case.ChangeWeaponGuise(template_id, guise_item_id=item_id)
             if int(getattr(case, 'guise_id', 0) or 0) != template_id:
                 raise ValueError('weapon case did not accept the template (model/resources may be unavailable)')
+            _bind_visual_metadata(case, template_id, item_id)
             accepted += 1
         return 'ChangeWeaponGuise template=%d item=%d cases=%d' % (template_id, int(selected['id']), accepted)
     except Exception as error:
-        _sys_log('skin request failed type=%d selection=%d: %s: %s' %
+        _sys_log('[sys:asset] request failed type=%d selection=%d: %s: %s' %
                  (typ, item, type(error).__name__, error))
         return ''
 
@@ -3376,12 +3643,12 @@ def _apply_hero(entity, item):
     import gshare.consts as consts
     try:
         proto = lobby.data.get(item)
-        if proto is None or int(proto.get('sub_type') or 0) != 300 or _skin_is_temporary(proto):
-            raise ValueError('not a permanent character skin item')
+        if proto is None or int(proto.get('sub_type') or 0) != 300 or _item_transient_check(proto):
+            raise ValueError('not a permanent character item')
         current_hero = _hero_of(entity) or _local_hero_id()
         wanted_hero = int(proto.get('hero_id') or 0)
         if not wanted_hero or current_hero != wanted_hero:
-            raise ValueError('skin hero=%d does not match current combat hero=%d' % (wanted_hero, current_hero))
+            raise ValueError('character hero=%d does not match current combat hero=%d' % (wanted_hero, current_hero))
         clothes = getattr(entity, 'arm_clothes', None)
         callback = getattr(entity, '_on_set_arm_clothes', None)
         display = getattr(entity, 'GetDisplayHeroSkinItemId', None)
@@ -3404,7 +3671,7 @@ def _apply_hero(entity, item):
             raise
         return 'combat arm_clothes -> ShowModel item=%d' % item
     except Exception as error:
-        _sys_log('hero skin request failed item=%d: %s: %s' % (item, type(error).__name__, error))
+        _sys_log('[sys:asset] character request failed item=%d: %s: %s' % (item, type(error).__name__, error))
         return ''
 
 
@@ -3424,14 +3691,14 @@ def _apply(cfg):
     seq, typ, item = int(cfg[IDX_APPLY_SEQ]), int(cfg[IDX_APPLY_TYPE]), int(cfg[IDX_APPLY_ITEM])
     if typ not in (1, 2, 3) or not item:
         return
-    if int(cfg[IDX_AUTO_SKIN]):
+    if int(cfg[IDX_AUTO_THEME]):
         _last_apply_seq = seq
         return
     if seq != _apply_seq_seen:
         _apply_seq_seen, _apply_tries = seq, 0
     if seq == _last_apply_seq or time.time() - _last_apply_try < 0.25:
         return
-    entity = _skin_entity()
+    entity = _target_mesh_avatar()
     if entity is None:
         return
     _last_apply_try = time.time()
@@ -3439,7 +3706,7 @@ def _apply(cfg):
         via = _apply_hero(entity, item) if typ == 1 else _update_model_appearance(entity, item, typ)
         if via:
             _last_apply_seq, _apply_tries = seq, 0
-            _sys_log('skin update requested type=%d item=%d via=%s' % (typ, item, via))
+            _sys_log('[sys:asset] update requested type=%d item=%d via=%s' % (typ, item, via))
         else:
             _apply_tries += 1
             if _apply_tries >= 8:
@@ -3449,10 +3716,10 @@ def _apply(cfg):
 
 
 
-def _queue_skin(typ, item):
+def _enqueue_appearance_task(typ, item):
     if not item:
         return
-    if typ == 1 and _skin_respect_current:
+    if typ == 1 and _asset_preserve_active:
         try:
             import gclient.data.lobby_item_data as lobby
             want = _hero_of(lobby.data.get(item))
@@ -3462,39 +3729,39 @@ def _queue_skin(typ, item):
         except Exception:
             pass
     key = (typ, int(item))
-    if key not in _skin_task:
-        _skin_task.append(key)
+    if key not in _appearance_task:
+        _appearance_task.append(key)
 
 
-def _run_skin_tasks():
-    global _skin_task_t
+def _dispatch_appearance_queue():
+    global _appearance_task_t
     now = time.time()
-    if not _skin_task or now - _skin_task_t < 0.30:
+    if not _appearance_task or now - _appearance_task_t < 0.30:
         return
-    entity = _skin_entity()
+    entity = _target_mesh_avatar()
     if entity is None:
         return
-    _skin_task_t = now
-    typ, item = _skin_task.pop(0)
+    _appearance_task_t = now
+    typ, item = _appearance_task.pop(0)
     key = (typ, item)
     try:
         via = _apply_hero(entity, item) if typ == 1 else _update_model_appearance(entity, item, typ)
         if via:
-            _skin_fail.pop(key, None)
-            _sys_log('skin update requested type=%d item=%d via=%s' % (typ, item, via))
+            _appearance_fail.pop(key, None)
+            _sys_log('[sys:asset] update requested type=%d item=%d via=%s' % (typ, item, via))
         else:
-            count = _skin_fail.get(key, 0) + 1
-            _skin_fail[key] = count
+            count = _appearance_fail.get(key, 0) + 1
+            _appearance_fail[key] = count
             if count < 6:
-                _skin_task.append(key)
+                _appearance_task.append(key)
             else:
-                _sys_log('skin retries stopped type=%d item=%d; see request error above' % key)
+                _sys_log('[sys:asset] retries stopped type=%d item=%d; see request error above' % key)
     except Exception:
         _sys_log(traceback.format_exc())
 
 
 
-def _skin_inventory_path():
+def _cached_manifest_path():
     import os
     local = os.environ.get('LOCALAPPDATA')
     if local:
@@ -3502,18 +3769,18 @@ def _skin_inventory_path():
     return os.path.join(IPC_DIR, 'skin_inventory.bin')
 
 
-def _skin_inventory(force=False):
+def _read_asset_manifest(force=False):
     import os
     now = time.time()
-    cached = getattr(_skin_inventory, 'records', None)
-    if not force and now < getattr(_skin_inventory, 'next_poll', 0):
+    cached = getattr(_read_asset_manifest, 'records', None)
+    if not force and now < getattr(_read_asset_manifest, 'next_poll', 0):
         return cached
-    _skin_inventory.next_poll = now + 1.0
+    _read_asset_manifest.next_poll = now + 1.0
     try:
-        path = _skin_inventory_path()
+        path = _cached_manifest_path()
         stat = os.stat(path)
         stamp = (stat.st_mtime_ns, stat.st_size)
-        if stamp == getattr(_skin_inventory, 'stamp', None):
+        if stamp == getattr(_read_asset_manifest, 'stamp', None):
             return cached
         with open(path, 'rb') as stream:
             raw = stream.read(12 + 4096 * 64 + 1)
@@ -3533,46 +3800,50 @@ def _skin_inventory(force=False):
             seen.add((typ, selection))
             if enabled:
                 active[(typ, slot)] = (typ, slot, selection)
-        _skin_inventory.records = tuple(active.values())
-        _skin_inventory.stamp = stamp
-        _skin_inventory.error = None
+        _read_asset_manifest.records = tuple(active.values())
+        _read_asset_manifest.stamp = stamp
+        _read_asset_manifest.error = None
     except FileNotFoundError:
-        _skin_inventory.records = None
-        _skin_inventory.stamp = None
-        _skin_inventory.error = None
+        _read_asset_manifest.records = None
+        _read_asset_manifest.stamp = None
+        _read_asset_manifest.error = None
     except Exception as error:
         message = '%s: %s' % (type(error).__name__, error)
-        if message != getattr(_skin_inventory, 'error', None):
-            _sys_log('skin inventory could not be loaded: ' + message)
-        _skin_inventory.error = message
+        if message != getattr(_read_asset_manifest, 'error', None):
+            _sys_log('[sys:asset] manifest could not be loaded: ' + message)
+        _read_asset_manifest.error = message
         # Keep the last valid inventory; never replace a damaged file with cfg defaults.
         if cached is None:
-            _skin_inventory.records = ()
-    return getattr(_skin_inventory, 'records', None)
+            _read_asset_manifest.records = ()
+    return getattr(_read_asset_manifest, 'records', None)
 
 
-def _skin_inventory_targets(entity, records):
+def _resolve_manifest_targets(entity, records):
     import gclient.data.lobby_item_data as lobby
     import gclient.data.equip_data as equips
     hero = _hero_of(entity) or _local_hero_id()
     cases = [case for case in _all_cases(entity)
              if callable(getattr(case, 'ChangeWeaponGuise', None)) and
              bool(getattr(case, 'is_in_combat', False))]
+    loaded_guns = {_slot_weapon_identifier(case) for case in cases if not _slot_is_melee_profile(case)}
+    has_melee = any(_slot_is_melee_profile(case) for case in cases)
     targets = []
     for typ, slot, selection in records:
         try:
             if typ == 1:
                 proto = lobby.data.get(selection) or {}
                 if (int(proto.get('sub_type') or 0) == 300 and
-                        not _skin_is_temporary(proto) and
+                        not _item_transient_check(proto) and
                         int(proto.get('hero_id') or 0) == hero == slot):
                     targets.append((typ, selection))
                 continue
-            proto, template, _ = _skin_selection(selection, typ)
+            if (typ == 2 and slot not in loaded_guns) or (typ == 3 and not has_melee):
+                continue
+            proto, template, _ = _resolve_asset_variant(selection, typ)
             if typ == 2:
                 gid = int(template.get('gun_id') or 0)
-                if gid == slot and gid > 0 and any(not _skin_case_is_melee(case) and
-                        _skin_case_gun_id(case) == gid for case in cases):
+                if gid == slot and gid > 0 and any(not _slot_is_melee_profile(case) and
+                        _slot_weapon_identifier(case) == gid for case in cases):
                     targets.append((typ, selection))
             else:
                 if int(proto.get('sub_type') or 0) * 100 + 2 != slot:
@@ -3580,7 +3851,7 @@ def _skin_inventory_targets(entity, records):
                 expected = int(template.get('replace_equip_id') or 0)
                 wanted_class = (equips.data.get(expected) or {}).get('equip_case')
                 for case in cases:
-                    if not _skin_case_is_melee(case):
+                    if not _slot_is_melee_profile(case):
                         continue
                     current = getattr(case, 'equip_proto', None) or {}
                     if not expected or expected == int(getattr(case, 'weapon_id', 0) or 0) or (
@@ -3595,41 +3866,41 @@ def _skin_inventory_targets(entity, records):
     return tuple(targets)
 
 
-def _drive_saved_skins(cfg):
-    global _skin_auto_seen, _skin_last_reapply, _skin_respect_current
-    if not int(cfg[IDX_AUTO_SKIN]):
-        _skin_task[:] = []
-        _skin_auto_seen = None
+def _sync_configured_appearance(cfg):
+    global _asset_auto_seen, _asset_last_sync, _asset_preserve_active
+    if not int(cfg[IDX_AUTO_THEME]):
+        _appearance_task[:] = []
+        _asset_auto_seen = None
         return
-    _skin_respect_current = _flag(cfg, F_SKIN_CURRENT)
-    entity = _skin_entity()
+    now = time.time()
+    _asset_preserve_active = _flag(cfg, F_THEME_PRESERVE)
+    entity = _target_mesh_avatar()
     if entity is None:
-        _skin_auto_seen = None
-        _skin_task[:] = []
-        _skin_fail.clear()
+        _asset_auto_seen = None
+        _appearance_task[:] = []
+        _appearance_fail.clear()
         return
     seq = int(cfg[IDX_APPLY_SEQ])
-    records = _skin_inventory(seq != getattr(_drive_saved_skins, 'inventory_seq', None))
-    _drive_saved_skins.inventory_seq = seq
+    records = _read_asset_manifest(seq != getattr(_sync_configured_appearance, 'inventory_seq', None))
+    _sync_configured_appearance.inventory_seq = seq
     if records is None:
         # Compatibility for configurations saved before Inventory existed.
         want = tuple((typ, int(cfg[index])) for typ, index in
-                     ((1, IDX_SKIN_HERO), (2, IDX_SKIN_GUN), (3, IDX_SKIN_KNIFE))
+                     ((1, IDX_THEME_HERO), (2, IDX_THEME_GUN), (3, IDX_THEME_KNIFE))
                      if int(cfg[index]))
     else:
-        want = _skin_inventory_targets(entity, records)
-    cases = tuple((id(case), _skin_case_gun_id(case), int(getattr(case, 'weapon_id', 0) or 0),
+        want = _resolve_manifest_targets(entity, records)
+    cases = tuple((id(case), _slot_weapon_identifier(case), int(getattr(case, 'weapon_id', 0) or 0),
                    bool(getattr(case, 'is_in_combat', False))) for case in _all_cases(entity))
     state = (want, seq, id(entity), id(getattr(genv, 'space', None)),
              _hero_of(entity) or _local_hero_id(), cases)
-    now = time.time()
-    if state != _skin_auto_seen or now - _skin_last_reapply > 20.0:
-        _skin_auto_seen = state
-        _skin_last_reapply = now
-        _skin_fail.clear()
-        _skin_task[:] = []
+    if state != _asset_auto_seen or now - _asset_last_sync > 20.0:
+        _asset_auto_seen = state
+        _asset_last_sync = now
+        _appearance_fail.clear()
+        _appearance_task[:] = []
         for typ, item in want:
-            _queue_skin(typ, item)
+            _enqueue_appearance_task(typ, item)
 
 
 
@@ -3787,6 +4058,170 @@ def _refresh_runtime_cosmetics():
         _sys_log(traceback.format_exc())
 
 
+_killfx_family_best = None   # family_key -> {'kill_hud_id':int, 'hit_effect':int, 'trail_effect':int, 'template_id':int}
+_killfx_catalog_rev = None   # (len, mtime surrogate) to detect catalog reload
+_killfx_log_t = 0.0
+_killfx_filled = 0
+
+def _killfx_family_key(proto):
+    """Group skins so premium members can lend their effect IDs to fellow family
+    members. Members of a weapon-skin family share hero_id + guise.template_id
+    (model) OR are upgrade siblings (same root). Fall back to gun_id when no
+    tighter grouping is available."""
+    hero = proto.get('hero_id') or proto.get('hero_skin_id')
+    template = int((proto.get('guise') or {}).get('template_id') or 0)
+    if hero and template:
+        return ('ht', int(hero), template)
+    if template:
+        return ('t', template)
+    gun = int(proto.get('gun_id') or 0)
+    if gun:
+        return ('g', gun)
+    return ('id', int(proto.get('id') or 0))
+
+
+def _killfx_build_family_best(rows):
+    """Walk the catalog once and, for each skin family, pick the top-quality
+    kill_hud_id / hit_effect / trail_effect / template_id across its members."""
+    best = {}
+    for proto in rows.values():
+        if not isinstance(proto, dict):
+            continue
+        sub = int(proto.get('sub_type') or 0)
+        is_gun = sub in (510, 520, 530, 540, 550, 560)
+        is_knife = sub in (201, 202, 203, 206, 207, 210)
+        if not (is_gun or is_knife):
+            continue
+        q = int(proto.get('quality') or 0)
+        key = _killfx_family_key(proto)
+        slot = best.setdefault(key, {'quality': 0, 'kill_hud_id': 0, 'hit_effect': 0, 'trail_effect': 0, 'template_id': 0})
+        template = int((proto.get('guise') or {}).get('template_id') or 0)
+        for field in ('kill_hud_id', 'hit_effect', 'trail_effect'):
+            v = proto.get(field)
+            if v and (not slot[field] or q >= slot['quality']):
+                slot[field] = int(v)
+        if template and (not slot['template_id'] or q > slot['quality']):
+            slot['template_id'] = template
+        if q > slot['quality']:
+            slot['quality'] = q
+    return best
+
+
+def _killfx_scan():
+    """Build the family-best map, refreshed when the catalog reloads or every 60s.
+    Returns (rows_dict, family_best_dict) or (None, None) on failure."""
+    global _killfx_family_best, _killfx_catalog_rev
+    try:
+        import gclient.data.lobby_item_data as lobby
+    except Exception:
+        return None, None
+    rows = getattr(lobby, 'data', None)
+    if not isinstance(rows, dict):
+        return None, None
+    rev = (len(rows), id(rows))
+    if _killfx_family_best is None or _killfx_catalog_rev != rev:
+        _killfx_family_best = _killfx_build_family_best(rows)
+        _killfx_catalog_rev = rev
+    return rows, _killfx_family_best
+
+
+_killfx_patched_rev = None
+_killfx_local_pass_t = 0.0
+_killfx_patch_iter = None      # resumable iterator over rows.values()
+_killfx_patch_filled = 0
+
+def _killfx_patch_catalog_step(rows, best, budget=0.002):
+    """Incremental catalog patch, budgeted so one frame never blocks on a huge
+    rows dict. Resumes across ticks until every proto is visited, then returns
+    done=True so the caller stamps the revision."""
+    global _killfx_patch_iter, _killfx_patch_filled, _killfx_filled
+    if _killfx_patch_iter is None:
+        _killfx_patch_iter = iter(rows.values())
+        _killfx_patch_filled = 0
+    t0 = time.time()
+    try:
+        while time.time() - t0 < budget:
+            proto = next(_killfx_patch_iter)
+            if not isinstance(proto, dict):
+                continue
+            sub = int(proto.get('sub_type') or 0)
+            if sub not in (510, 520, 530, 540, 550, 560, 201, 202, 203, 206, 207, 210):
+                continue
+            slot = best.get(_killfx_family_key(proto))
+            if not slot:
+                continue
+            for field in ('kill_hud_id', 'hit_effect', 'trail_effect'):
+                v = slot[field]
+                if v and not proto.get(field):
+                    proto[field] = v
+                    _killfx_patch_filled += 1
+    except StopIteration:
+        _killfx_filled = _killfx_patch_filled
+        _killfx_patch_iter = None
+        return True
+    return False
+
+
+def _force_killfx_on_equipped():
+    """Two passes: (1) incrementally backfill the catalog so every owned skin
+    carries valid kill_hud_id + hit_effect + trail_effect; (2) copy the family-
+    best values onto the local weapon cases so the engine picks them up. Pass 1
+    is time-budgeted (2 ms/tick); pass 2 is throttled to 2 Hz."""
+    global _killfx_log_t, _killfx_patched_rev, _killfx_local_pass_t
+    rows, best = _killfx_scan()
+    if not rows or not best:
+        return
+
+    # Pass 1: incremental catalog patch, resumed across ticks until the
+    # current revision is fully walked.
+    if _killfx_patched_rev != _killfx_catalog_rev:
+        if _killfx_patch_catalog_step(rows, best):
+            _killfx_patched_rev = _killfx_catalog_rev
+            _sys_log('force_killfx catalog patched fields_filled=%d families=%d' % (_killfx_filled, len(best)))
+        # Don't proceed to pass 2 until pass 1 is done — avoids compounding work on the same frame.
+        return
+
+    # Pass 2: apply onto local weapon cases (2 Hz).
+    now = time.time()
+    if now - _killfx_local_pass_t < 0.5:
+        return
+    _killfx_local_pass_t = now
+    local, _av, _pos, _case = _local()
+    if local is None:
+        return
+    cases = []
+    for name in ('gun_case', 'weapon_case', 'main_case', 'cur_weapon_case'):
+        wc = getattr(local, name, None)
+        if wc is not None:
+            cases.append(wc)
+    try:
+        slots = getattr(local, 'weapon_cases', None)
+        if slots:
+            for c in (slots.values() if hasattr(slots, 'values') else slots):
+                if c is not None:
+                    cases.append(c)
+    except Exception:
+        pass
+    changed = 0
+    for case in cases:
+        for pname in ('equip_proto', 'body_equip_proto', 'weapon_proto', 'proto'):
+            proto = getattr(case, pname, None)
+            if not isinstance(proto, dict):
+                continue
+            slot = best.get(_killfx_family_key(proto))
+            if not slot:
+                continue
+            for field in ('kill_hud_id', 'hit_effect', 'trail_effect'):
+                v = slot[field]
+                if v and proto.get(field) != v:
+                    proto[field] = v
+                    changed += 1
+    now = time.time()
+    if changed and now - _killfx_log_t > 10.0:
+        _killfx_log_t = now
+        _sys_log('force_killfx live changes=%d cases=%d families=%d' % (changed, len(cases), len(best)))
+
+
 def _serialize_frame_data(cfg, cam, in_match, origin, lpos, items):
     global _state_seq
     fwd = (0.0, 0.0, -1.0)
@@ -3914,11 +4349,13 @@ def _on_story_tick(dt):
         in_match = not bool(getattr(genv, 'is_in_hall', True))
         _sync_ray_interceptor(cfg, in_match)
         _apply(cfg)
-        _drive_saved_skins(cfg)
-        _run_skin_tasks()
+        _sync_configured_appearance(cfg)
+        _dispatch_appearance_queue()
         t_apply = time.time()
         if _flag(cfg, F_UNLOCK_EFFECTS):
             _refresh_runtime_cosmetics()
+        if _flag(cfg, F_FORCE_KILLFX):
+            _force_killfx_on_equipped()
         t_unlock = time.time()
         cam = None
         origin = None
@@ -3973,6 +4410,7 @@ def _on_story_tick(dt):
             _track_busy = False
         t_track = time.time()
         _sync_impulse_damping(cfg, in_match)
+        _sync_weapon_case_damping(cfg, in_match)
         _last_state = now
         av, lid, team, lpos = _local()
         buf = _serialize_frame_data(cfg, cam, in_match, origin, lpos, items)
@@ -3980,7 +4418,7 @@ def _on_story_tick(dt):
             _write(STATE_PATH, buf)
         t1 = time.time()
         total = t1 - t0
-        if (total > 0.06 or t_aim - t_apply > 0.04) and t0 - _perf_last >= 1.0:
+        if (total > 0.06 or t_track - t_gather > 0.04) and t0 - _perf_last >= 1.0:
             _perf_last = t0
             _sys_log('[sys:perf] dt=%.3f total=%.3f apply=%.4f unlock=%.4f gather=%.4f track=%.4f state=%.4f items=%d' % (
                 dt, total, t_apply - t0, t_unlock - t_apply, t_gather - t_unlock,

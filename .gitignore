@@ -13,12 +13,15 @@
 *.bak
 *.tmp
 
-# Keep the independently maintained runtime source snapshot in dist.
-/dist/*
-!/dist/pyexec/
-/dist/pyexec/*
-!/dist/pyexec/bs_runtime.py
-!/dist/pyexec/cmd.py
+# Distribution copies and generated packaging metadata stay local.
+/dist/
+/reports/**/*build*.json
+/reports/aim-mode-probe/menu-*/
+/.impeccable/review/
+/reports/aim-mode-probe/contract.error.txt
+/reports/weapon-effects/installed-effects.json
+/reports/weapon-effects/live-catalog*.json
+/reports/weapon-effects/resolved-catalog.json
 
 # User state and diagnostics
 /ipc/

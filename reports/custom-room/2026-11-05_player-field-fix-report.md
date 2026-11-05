@@ -9,7 +9,7 @@ Ngày: 2026-11-05. Phạm vi: runtime của dự án và phiên BloodStrike PID 
 - `_local`: khi không có liên kết controlled-avatar rõ ràng, dùng chính `genv.player` nếu đây là combat avatar, trước fallback `genv.avatar`. Mục đích là không lấy self ID/team từ avatar cũ khi chuyển chế độ.
 - Bổ sung hồi quy cho remote avatar, team, kỹ năng giả avatar, HP hiện tại và local avatar cũ.
 
-Đã thay đúng ba helper trong runtime đang chạy, không gọi lại startup. Cập nhật source ở đường dẫn runtime đang dùng và `dist/pyexec/bs_runtime.py`. Trong `dist/CiyE_Loader.exe`, chỉ thay entry Python runtime của payload; giữ native loader và các entry khác. Kiểm tra lại runtime nhúng khớp byte với mã nguồn. Hash nằm ở `fix-build-manifest.json`.
+Đã thay đúng ba helper trong runtime đang chạy, không gọi lại startup; cập nhật source runtime tương ứng.
 
 ## Kiểm tra và giới hạn
 
@@ -36,13 +36,8 @@ Thêm `--apply-fix` nếu cần cập nhật ba helper trong module đã nạp. 
 - E-fix-source: `pyexec/bs_runtime.py` và `tests/test_esp_filters.py`; lệnh unittest phía trên tái hiện hồi quy.
 - E-fix-custom: `fix-snapshot-regression.json`, đối chiếu hai snapshot gốc ở báo cáo trước. Đây là kiểm tra trên dữ liệu đã ghi, không phải live custom sau sửa.
 - E-fix-live: `fix-lobby-1.json` xác nhận helper đã nạp vào game; `fix-live-2.json` xác nhận phiên tập bắn.
-- E-fix-build: `fix-build-manifest.json` và so khớp runtime nhúng byte-for-byte.
 - F-remote: đã xác nhận helper mới nhận CombatAvatarSquadFight từ snapshot, trong khi bộ lọc trước bỏ sót.
 - F-hp: đã xác nhận helper mới chọn HP tối đa hiện tại 225 thay cho 125 ở trường hợp đã ghi.
 - Path: `genv.space.combat_avatars` → `_is_combat` → `_query_visible_entities`; entity → `_max_hp` → `_serialize_frame_data`; `genv.player` → `_local` → self/team filter.
 
 Kết luận hiện tại: mã và payload đã sửa; kiểm thử hồi quy, dữ liệu custom đã ghi và phiên tập bắn trực tiếp đạt. Chưa xác nhận hành vi/render trong custom room và trận thường/rank sau sửa.
-
-## Bản Release giao người dùng tự test
-
-Theo yêu cầu tiếp theo của người dùng, dừng chờ kiểm tra live hai chế độ và build EXE để người dùng tự test. `cmake --build build --config Release --target pack_loader` thành công, tạo `dist/CiyE.exe` với 8 file payload. Đã đọc lại footer/payload và xác nhận `pyexec/bs_runtime.py`, `pyexec/cmd.py` nhúng khớp byte với source. Metadata và SHA-256 nằm tại `release-build-manifest.json`. Không chạy thêm injector hoặc tự vào trận.

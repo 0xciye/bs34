@@ -72,7 +72,7 @@ enum : uint32_t {
     F_SKIN_CURRENT   = 1u << 22,
     F_RECOIL         = 1u << 23,
     F_AIM_MULTIPOINT = 1u << 24,
-    F_STREAM_PROOF   = 1u << 25,
+    F_FORCE_KILLFX   = 1u << 25,
     F_EXIT_CHEAT     = 1u << 26,
     F_ESP_CORNER     = 1u << 27,
     F_ESP_OUTLINE    = 1u << 28,

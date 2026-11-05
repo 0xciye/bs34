@@ -60,12 +60,17 @@ enable_language(RC)
 
 add_executable(bs_loader WIN32
     src/loader.cpp
-    src/ui34/ui_renderer.cpp
+    "${IMGUI_DIR}/imgui.cpp"
+    "${IMGUI_DIR}/imgui_draw.cpp"
+    "${IMGUI_DIR}/imgui_tables.cpp"
+    "${IMGUI_DIR}/imgui_widgets.cpp"
+    "${IMGUI_DIR}/backends/imgui_impl_dx11.cpp"
+    "${IMGUI_DIR}/backends/imgui_impl_win32.cpp"
     resources/app.rc
 )
-target_include_directories(bs_loader PRIVATE src)
+target_include_directories(bs_loader PRIVATE "${IMGUI_DIR}" "${IMGUI_DIR}/backends" src)
 target_compile_definitions(bs_loader PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
-target_link_libraries(bs_loader PRIVATE d3d11 dxgi d2d1 dwrite dwmapi shell32 advapi32 user32)
+target_link_libraries(bs_loader PRIVATE d3d11 dxgi dwmapi shell32 advapi32 user32)
 set_target_properties(bs_loader PROPERTIES
     WIN32_EXECUTABLE TRUE
     OUTPUT_NAME "CiyE"
@@ -79,12 +84,17 @@ option(BS_LOADER_PREVIEW "Build a non-elevated preview of the loader for UI test
 if(BS_LOADER_PREVIEW)
     add_executable(bs_loader_preview WIN32
         src/loader.cpp
-        src/ui34/ui_renderer.cpp
+        "${IMGUI_DIR}/imgui.cpp"
+        "${IMGUI_DIR}/imgui_draw.cpp"
+        "${IMGUI_DIR}/imgui_tables.cpp"
+        "${IMGUI_DIR}/imgui_widgets.cpp"
+        "${IMGUI_DIR}/backends/imgui_impl_dx11.cpp"
+        "${IMGUI_DIR}/backends/imgui_impl_win32.cpp"
         resources/app.rc
     )
-    target_include_directories(bs_loader_preview PRIVATE src)
+    target_include_directories(bs_loader_preview PRIVATE "${IMGUI_DIR}" "${IMGUI_DIR}/backends" src)
     target_compile_definitions(bs_loader_preview PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
-    target_link_libraries(bs_loader_preview PRIVATE d3d11 dxgi d2d1 dwrite dwmapi shell32 advapi32 user32)
+    target_link_libraries(bs_loader_preview PRIVATE d3d11 dxgi dwmapi shell32 advapi32 user32)
     set_target_properties(bs_loader_preview PROPERTIES WIN32_EXECUTABLE TRUE)
 endif()
 
@@ -127,17 +137,4 @@ if(BS_MENU_PREVIEW)
     target_include_directories(bs_menu_preview PRIVATE ${MENU_PREVIEW_INCLUDES})
     target_compile_definitions(bs_menu_preview PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
     target_link_libraries(bs_menu_preview PRIVATE d3d11 dxgi d3dcompiler dcomp dwmapi user32 windowscodecs ole32)
-endif()
-
-if(BS_MENU_PREVIEW)
-    add_executable(bs_stream_proof_check tools/stream_proof_check.cpp
-        "${IMGUI_DIR}/imgui.cpp" "${IMGUI_DIR}/imgui_draw.cpp"
-        "${IMGUI_DIR}/imgui_tables.cpp" "${IMGUI_DIR}/imgui_widgets.cpp"
-        "${IMGUI_DIR}/backends/imgui_impl_dx11.cpp")
-    target_include_directories(bs_stream_proof_check PRIVATE "${IMGUI_DIR}" "${IMGUI_DIR}/backends")
-    target_compile_definitions(bs_stream_proof_check PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
-    target_link_libraries(bs_stream_proof_check PRIVATE d3d11 dxgi d3dcompiler dcomp user32 ole32)
-    if(MSVC)
-        target_compile_options(bs_stream_proof_check PRIVATE /UNDEBUG)
-    endif()
 endif()
