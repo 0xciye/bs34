@@ -4,7 +4,7 @@ Private Blood Strike source checkpoint: **v2.1.0-stable**.
 
 Status: the user confirmed in-game operation on **2026-11-05 (Asia/Bangkok)**. This is the user's validation; the coding agent did not independently build or run the application in game.
 
-This checkpoint includes the revised CiyE menu and loader presentation, permanent high-tier cosmetic selection, and the Inventory tab. Inventory stores Apply selections on disk and schedules compatible saved skins again when combat equipment or sessions change. Historical choices remain available for reselection.
+This checkpoint includes the revised CiyE menu and loader presentation, permanent high-tier cosmetic selection, and the Inventory tab. Inventory shows equipped selections only. Clicking a skin name or Apply in Characters, Knives or Guns immediately replaces and saves its slot. Compatible saved skins are scheduled again when combat equipment or sessions change; inactive history from older files is removed.
 
 Both main and dist runtime copies passed **40 offline tests each**. Tests extract only cosmetic functions and use mocked game objects. They do not start the full runtime or establish live-game compatibility.
 

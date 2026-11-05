@@ -1,0 +1,7 @@
+{
+  "runtime_sha256": "9e159dda927bbae1725434a5d349ea4319e06cfdedb963857f24835ad2442671",
+  "loader_sha256": "d3e7c2f641badeb457fa361b3bcc0849e478f22178037db23826fc2cb19f02cb",
+  "loader": "dist/CiyE_Loader.exe",
+  "payload_files": 8,
+  "unchanged_native_loader_sha256": "11c18e40dd209ea3285fc102bfd5435a51cd7f588d042cb56505447d5cded759"
+}

@@ -4,8 +4,8 @@
 
 - Thêm tab Inventory sau Characters, Knives và Guns.
 - Apply lưu tên, loại, nhóm và ID skin vào `%LOCALAPPDATA%\CiyE\BloodStrike\skin_inventory.bin`. Nếu không có LOCALAPPDATA, dùng thư mục IPC hiện tại. File được ghi tạm rồi thay thế nguyên tử.
-- Giữ lịch sử mọi skin đã Apply; chọn lại không tạo bản ghi trùng. Mỗi nhân vật/nhóm vũ khí có một lựa chọn Selected mới nhất. Các lựa chọn cũ mang nhãn History.
-- Inventory dùng chung ô tìm kiếm, có Apply và Remove. Xem được dữ liệu đã lưu kể cả lúc catalog chưa tải. Remove ngừng tự áp dụng lựa chọn đó; không hoàn tác ngay model đang hiển thị trong trận.
+- Chỉ giữ skin đang equip cho mỗi nhân vật/nhóm vũ khí, không lưu history. Bấm tên skin hoặc Apply ở Characters, Knives, Guns sẽ thay lựa chọn cùng slot và lưu ngay. Khi đọc file cũ, bỏ các dòng history không active.
+- Inventory dùng chung ô tìm kiếm, chỉ có Remove. Xem được dữ liệu đã lưu kể cả lúc catalog chưa tải. Remove ngừng tự áp dụng lựa chọn đó; không hoàn tác ngay model đang hiển thị trong trận.
 - Giữ công tắc Auto apply saved skins. Khi bật, runtime đọc Inventory, chờ đúng combat avatar và trang bị tương thích rồi đưa yêu cầu vào hàng đợi. Đổi trận, qua sảnh, vào phòng tập, đổi hero hoặc tạo thêm weapon case sẽ làm mới hàng đợi. Nếu nhiều nhóm dao cùng tương thích, lựa chọn gần nhất được ưu tiên.
 - File tồn tại nhưng rỗng sẽ không lấy lại các ID cũ trong cfg. File hỏng được báo lỗi và giữ nguyên, không ghi đè bằng mặc định. Chuyển ba lựa chọn cũ sang Inventory khi chưa có file và catalog đã tải.
 
@@ -22,3 +22,11 @@ Không tạo/ghi file Inventory thật của người dùng trong lúc sửa sou
 Tệp đã sửa: src/overlay.cpp, pyexec/bs_runtime.py, dist/pyexec/bs_runtime.py, tests/test_skin_flow.py; cập nhật DESIGN.md ở thư mục dự án ngoài.
 
 Backup: skin_inventory_before.zip. Diff: skin_inventory_changes.diff. Manifest và schema: skin_inventory_manifest.json.
+
+## Catalog dao và cấp súng (2026-11-05)
+
+Đối chiếu danh sách 52 dao: 48 dao thường đã qua bộ lọc, bổ sung 4 Artifact subtype 210 (Fireborn, Nexus, Pivot, RAZE). Nhóm Artifacts hiển thị tham khảo; chưa cho Apply vì runtime cần cấu hình blade/handle/core/effect.
+
+Súng dùng nhóm gốc trong lobby_item_upgrade_data, chỉ hiển thị cấp cao nhất hợp lệ và vĩnh viễn của từng skin. Không gộp theo tên; giữ các ánh xạ template cũ để đọc lựa chọn đã lưu. Hai bản runtime dùng cùng quy tắc.
+
+Kiểm tra lần này: 45 ca offline cho mỗi bản runtime; đối chiếu catalog dao với dữ liệu cục bộ đủ 52/52 (template giả lập cho kiểm tra lọc). Chưa build EXE hoặc kiểm tra trong game.

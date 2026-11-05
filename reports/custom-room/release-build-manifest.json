@@ -1,0 +1,18 @@
+{
+  "loader": "C:\\Users\\CiyE\\Desktop\\bs cheat\\bs-cheat\\dist\\CiyE.exe",
+  "bytes": 2061537,
+  "sha256": "b9e2d8b7aad64835e8e007dc76d406c6d833806702cc0f8eeaba7c7dee971da7",
+  "runtime_sha256": "9e159dda927bbae1725434a5d349ea4319e06cfdedb963857f24835ad2442671",
+  "payload_files": [
+    "bs_pyexec.dll",
+    "bs_overlay.dll",
+    "pyexec/cmd.py",
+    "pyexec/bs_runtime.py",
+    "bsmap.exe",
+    "driver/bskdrv.sys",
+    "driver/kdmapper.exe",
+    "driver/iqvw64e.sys"
+  ],
+  "validation": "Release build succeeded; embedded runtime and cmd match source; 143 Python tests passed",
+  "live_custom_and_normal_match": "User will test manually"
+}

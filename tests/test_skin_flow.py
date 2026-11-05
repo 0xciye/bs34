@@ -128,6 +128,58 @@ class SkinFlowTests(unittest.TestCase):
         self.assertEqual({row[0] for row in entries}, {11199001, 11000008})
         self.assertEqual({row[3] for row in entries}, {1, 2})
         self.assertEqual({row[2] for row in entries}, {4, 5})
+    def catalog_guns(self):
+        buf = self.call('_index_item_templates')
+        _, _, heroes, guns = struct.unpack_from('<IIII', buf)
+        return [struct.unpack_from('<IIII48s', buf, 16 + (heroes+i)*64) for i in range(guns)]
+
+    def install_upgrade_fixture(self):
+        module = types.ModuleType('gclient.data.lobby_item_upgrade_data')
+        module.data = {510010010: {}}
+        sys.modules[module.__name__] = module
+        for level in (5, 1, 3, 2, 4):
+            iid, tid = 510010010 + level, 11199000 + level
+            self.items[iid] = {**self.items[510010010], 'id': iid, 'guise': {'template_id': tid}}
+            self.templates[tid] = {'id': tid, 'gun_id': 1}
+            module.data[510010010][level] = {'item_id': iid}
+        module.data[510010010][0] = {'item_id': 510010010}
+
+    def test_catalog_keeps_only_highest_gun_level_and_resolves_saved_lower_level(self):
+        self.install_upgrade_fixture()
+        rows = [r for r in self.catalog_guns() if r[3] == 1]
+        self.assertEqual([r[0] for r in rows], [11199005])
+        self.assertIn(b'[Lv 5]', rows[0][4])
+        self.assertEqual(self.call('_skin_selection', 11199002, 2)[0]['id'], 510010012)
+
+    def test_catalog_resolves_highest_level_when_levels_share_a_template(self):
+        self.install_upgrade_fixture()
+        for level in range(1, 6):
+            self.items[510010010 + level]['guise'] = {'template_id': 11199001}
+        rows = [r for r in self.catalog_guns() if r[3] == 1]
+        self.assertEqual(len(rows), 1)
+        self.assertIn(b'[Lv 5]', rows[0][4])
+        self.assertEqual(self.call('_skin_selection', 11199001, 2)[0]['id'], 510010015)
+
+    def test_catalog_keeps_distinct_gun_skin_with_same_name(self):
+        self.install_upgrade_fixture()
+        self.items[510020010] = {**self.items[510010010], 'id': 510020010, 'guise': {'template_id': 11299001}}
+        self.templates[11299001] = {'id': 11299001, 'gun_id': 1}
+        self.assertEqual({r[0] for r in self.catalog_guns() if r[3] == 1}, {11199005, 11299001})
+
+    def test_catalog_uses_highest_valid_permanent_level(self):
+        self.install_upgrade_fixture()
+        self.items[510010015]['use_code_params'] = {'use_time': 3600}
+        self.assertEqual([r[0] for r in self.catalog_guns() if r[3] == 1], [11199004])
+
+    def test_catalog_includes_four_artifacts_without_generic_weapon_templates(self):
+        for iid, tid, name in [(2000000030, 91000003, 'Fireborn'), (2000000020, 91000002, 'Nexus'),
+                               (2000000010, 91000001, 'Pivot'), (2000000050, 91000004, 'RAZE')]:
+            self.items[iid] = {'id': iid, 'name': name, 'quality': 7, 'sub_type': 210,
+                               'guise': {'template_id': tid}}
+        rows = [r for r in self.catalog_guns() if r[1] == 21002]
+        self.assertEqual({r[0] for r in rows}, {91000001, 91000002, 91000003, 91000004})
+        self.assertTrue(all(r[3] == 2 for r in rows))
+
     def test_catalog_skips_negative_character_selector(self):
         self.items[12] = {**self.items[3001130002], 'id': 12, 'hero_skin_id': -1}
         buf = self.call('_index_item_templates')

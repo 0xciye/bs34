@@ -20,10 +20,12 @@
 #include <thread>
 #include <chrono>
 
-#include "imgui.h"
-#include "ui_theme.h"
-#include "imgui_impl_win32.h"
-#include "imgui_impl_dx11.h"
+#include <sstream>
+#include <algorithm>
+#include <cmath>
+#include <windowsx.h>
+
+#include "ui34/ui_renderer.hpp"
 
 #pragma comment(lib, "d3d11.lib")
 #pragma comment(lib, "dxgi.lib")
@@ -32,26 +34,12 @@
 #pragma comment(lib, "advapi32.lib")
 #pragma comment(lib, "user32.lib")
 
-extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam,
-                                                             LPARAM lParam);
-
 namespace {
 
-constexpr const char* kBrand = "CiyE";
-constexpr const char* kSub = "BLOODSTRIKE INTERNAL";
-constexpr const char* kVersion = "v2.1";
+constexpr const wchar_t* kBrandW = L"CiyE";
+constexpr const wchar_t* kVersionW = L"v2.1";
 constexpr const wchar_t* kGame = L"BloodStrike.exe";
 constexpr uint8_t kMagic[8] = {'B', 'S', 'L', 'D', 'P', 'A', 'Y', '1'};
-
-const ImU32 kAccent = IM_COL32(164, 143, 246, 255);
-const ImU32 kAccentHot = IM_COL32(96, 190, 255, 255);
-const ImU32 kAccentDeep = IM_COL32(40, 120, 220, 255);
-const ImU32 kText = IM_COL32(232, 232, 236, 255);
-const ImU32 kMuted = IM_COL32(158, 158, 169, 255);
-const ImU32 kDim = IM_COL32(84, 96, 118, 255);
-const ImU32 kSuccess = IM_COL32(80, 220, 150, 255);
-const ImU32 kError = IM_COL32(255, 96, 112, 255);
-const ImU32 kWarn = IM_COL32(255, 190, 84, 255);
 
 // ---------------------------------------------------------------------------
 // D3D / window state
@@ -63,15 +51,11 @@ IDXGISwapChain* g_swap = nullptr;
 ID3D11RenderTargetView* g_rtv = nullptr;
 HWND g_hwnd = nullptr;
 bool g_running = true;
-float g_scale = 1.0f;
 
-ImFont* g_font = nullptr;
-ImFont* g_font_bold = nullptr;
-ImFont* g_font_med = nullptr;
-ImFont* g_font_small = nullptr;
-ImFont* g_font_mono = nullptr;
-
-inline float S(float v) { return v * g_scale; }
+constexpr float kWindowW = 760.0f;
+constexpr float kWindowH = 480.0f;
+constexpr float kTitlebarH = 44.0f;
+constexpr float kTitlebarButtonsW = 84.0f;
 
 void CreateRenderTarget() {
     ID3D11Texture2D* back = nullptr;
@@ -91,12 +75,11 @@ void CleanupRenderTarget() {
 bool CreateDeviceD3D(HWND hwnd) {
     DXGI_SWAP_CHAIN_DESC sd{};
     sd.BufferCount = 2;
-    sd.BufferDesc.Width = 0;
-    sd.BufferDesc.Height = 0;
-    sd.BufferDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    sd.BufferDesc.Width = (UINT)kWindowW;
+    sd.BufferDesc.Height = (UINT)kWindowH;
+    sd.BufferDesc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;  // D2D needs BGRA
     sd.BufferDesc.RefreshRate.Numerator = 60;
     sd.BufferDesc.RefreshRate.Denominator = 1;
-    sd.Flags = DXGI_SWAP_CHAIN_FLAG_ALLOW_MODE_SWITCH;
     sd.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
     sd.OutputWindow = hwnd;
     sd.SampleDesc.Count = 1;
@@ -106,10 +89,11 @@ bool CreateDeviceD3D(HWND hwnd) {
     const D3D_FEATURE_LEVEL levels[] = {D3D_FEATURE_LEVEL_11_0, D3D_FEATURE_LEVEL_10_0};
     D3D_FEATURE_LEVEL got;
     HRESULT hr = D3D11CreateDeviceAndSwapChain(
-        nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr, 0, levels, 2, D3D11_SDK_VERSION, &sd,
-        &g_swap, &g_device, &got, &g_context);
+        nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr, D3D11_CREATE_DEVICE_BGRA_SUPPORT, levels, 2,
+        D3D11_SDK_VERSION, &sd, &g_swap, &g_device, &got, &g_context);
     if (hr == DXGI_ERROR_UNSUPPORTED) {
-        hr = D3D11CreateDeviceAndSwapChain(nullptr, D3D_DRIVER_TYPE_WARP, nullptr, 0, levels, 2,
+        hr = D3D11CreateDeviceAndSwapChain(nullptr, D3D_DRIVER_TYPE_WARP, nullptr,
+                                           D3D11_CREATE_DEVICE_BGRA_SUPPORT, levels, 2,
                                            D3D11_SDK_VERSION, &sd, &g_swap, &g_device, &got,
                                            &g_context);
     }
@@ -737,7 +721,7 @@ enum Phase { kIdle = 0, kWaiting = 1, kInjecting = 2, kReady = 3, kFailed = 4 };
 std::atomic<int> g_phase{kIdle};
 std::atomic<unsigned long> g_pid{0};
 std::atomic<bool> g_busy{false};
-std::atomic<bool> g_driver_mode{true};
+std::atomic<bool> g_driver_mode{false};
 std::atomic<bool> g_used_driver{false};
 std::atomic<unsigned long> g_live_pid{0};
 std::atomic<bool> g_auto_inject{false};
@@ -820,9 +804,552 @@ void InjectWorker(bool driver_mode) {
 }
 
 // ---------------------------------------------------------------------------
-// UI
+// UI - 34Cheat visual language (D2D immediate mode)
 // ---------------------------------------------------------------------------
 
+constexpr float kPi34 = 3.14159265f;
+
+std::wstring Utf8ToWideL(const std::string& s) {
+    if (s.empty()) return {};
+    int n = MultiByteToWideChar(CP_UTF8, 0, s.data(), (int)s.size(), nullptr, 0);
+    std::wstring out(n > 0 ? n : 0, L'\0');
+    if (n > 0) MultiByteToWideChar(CP_UTF8, 0, s.data(), (int)s.size(), &out[0], n);
+    return out;
+}
+
+enum StepStatus { StepPending, StepWorking, StepCompleted, StepFailed };
+
+struct PipelineStep {
+    std::wstring Title;
+    std::wstring Detail;
+    StepStatus Status{StepPending};
+};
+
+std::vector<PipelineStep> g_steps;
+int g_current_step = 0;
+float g_target_progress = 0.0f;
+float g_shown_progress = 0.0f;
+float g_intro_time = 0.0f;
+bool g_intro_done = false;
+float g_ready_time = 0.0f;
+std::wstring g_hwid;
+
+void BuildSteps(bool driver) {
+    g_steps.clear();
+    g_steps.push_back({ L"Payload",     L"Extracting embedded modules", StepWorking });
+    if (driver) {
+        g_steps.push_back({ L"Driver",  L"Mapping kernel driver",       StepPending });
+    }
+    g_steps.push_back({ L"BloodStrike", L"Waiting for BloodStrike.exe", StepPending });
+    g_steps.push_back({ L"Inject",      L"Loading overlay into the game", StepPending });
+    g_current_step = 0;
+    g_target_progress = 0.0f;
+    g_shown_progress = 0.0f;
+}
+
+void InitSteps() {
+    BuildSteps(g_driver_mode.load());
+    DWORD serial = 0;
+    GetVolumeInformationA("C:\\", nullptr, 0, &serial, nullptr, nullptr, nullptr, 0);
+    wchar_t buf[16];
+    swprintf_s(buf, L"%08X", serial);
+    g_hwid = buf;
+}
+
+float Phase34(float t, float from, float to) {
+    float x = (t - from) / (to - from);
+    if (x < 0) x = 0; if (x > 1) x = 1; return x;
+}
+float EaseOut34(float x) { return 1.0f - (1.0f - x) * (1.0f - x) * (1.0f - x); }
+float EaseInOut34(float x) { return x < 0.5f ? 4.0f * x * x * x : 1.0f - std::pow(-2.0f * x + 2.0f, 3.0f) / 2.0f; }
+
+constexpr float kIntroExit34 = 2.85f;
+constexpr float kIntroEnd34 = 3.30f;
+
+void RenderStep34(const PipelineStep& step, const Math::Vector2& pos, float width, bool last) {
+    auto& ui = UI::g_UI;
+    const auto& c = ui.GetColors();
+    const float rowH = 58.0f;
+    Math::Vector2 marker{pos.x + 10.0f, pos.y + 11.0f};
+
+    if (!last) {
+        ui.DrawLine({marker.x, marker.y + 14.0f}, {marker.x, pos.y + rowH + 1.0f},
+            step.Status == StepCompleted ? UI::WithAlpha(c.Success, 0.45f) : c.BorderSubtle, 1.5f);
+    }
+    D2D1_COLOR_F titleColor = c.TextPrimary;
+    switch (step.Status) {
+    case StepCompleted:
+        ui.FillCircle(marker, 9.0f, c.Success);
+        ui.DrawIcon(UI::Icon::Check, marker, 10.0f, D2D1::ColorF(0x0F1012, 1.0f));
+        break;
+    case StepWorking:
+        ui.DrawCircle(marker, 8.0f, c.BorderSubtle, 2.0f);
+        ui.DrawArc(marker, 8.0f, ui.Time() * 5.0f, kPi34 * 1.2f, c.Accent, 2.0f);
+        break;
+    case StepFailed:
+        ui.FillCircle(marker, 9.0f, c.Danger);
+        ui.DrawIcon(UI::Icon::Cross, marker, 9.0f, D2D1::ColorF(0xFFFFFF, 1.0f));
+        break;
+    case StepPending:
+        ui.DrawCircle(marker, 8.0f, c.BorderHover, 1.5f);
+        titleColor = c.TextTertiary;
+        break;
+    }
+    float textX = pos.x + 34.0f;
+    ui.DrawText(step.Title, {textX, pos.y + 1.0f}, {width - 34.0f, 20.0f}, titleColor, UI::FontBold);
+    ui.DrawText(step.Detail, {textX, pos.y + 21.0f}, {width - 34.0f, 18.0f},
+        step.Status == StepFailed ? c.Danger : c.TextSecondary, UI::FontSmall);
+}
+
+void RenderStatusMark34(const Math::Vector2& pos, float size, bool ready, bool failed) {
+    auto& ui = UI::g_UI;
+    const auto& colors = ui.GetColors();
+    const Math::Vector2 c{pos.x + size * 0.5f, pos.y + size * 0.5f};
+    const float r = size * 0.5f + 7.0f;
+    ui.DrawLogoMark(pos, size);
+    if (failed) {
+        ui.DrawCircle(c, r, UI::WithAlpha(colors.Danger, 0.7f), 1.5f);
+    } else if (ready) {
+        ui.DrawCircle(c, r, UI::WithAlpha(colors.Success, 0.7f), 1.5f);
+    } else {
+        const float spin = ui.Time() * 2.4f;
+        ui.DrawCircle(c, r, colors.BorderSubtle, 1.5f);
+        ui.DrawArc(c, r, spin, kPi34 * 0.55f, colors.Accent, 2.0f);
+        ui.DrawArc(c, r, spin + kPi34, kPi34 * 0.55f, colors.Accent, 2.0f);
+    }
+}
+
+void RenderIntro34(float exit) {
+    auto& ui = UI::g_UI;
+    const auto& colors = ui.GetColors();
+    const float t = g_intro_time;
+    const float W = kWindowW;
+    const float fade = 1.0f - EaseInOut34(exit);
+    const float lift = -EaseInOut34(exit) * 14.0f;
+    ui.FillRect({0, 0}, {kWindowW, kWindowH}, UI::WithAlpha(colors.BgBase, fade));
+    const float tile = 76.0f;
+    const Math::Vector2 c{W * 0.5f, 158.0f + lift};
+    const float open = EaseOut34(Phase34(t, 0.05f, 0.70f));
+    const float fill = EaseOut34(Phase34(t, 0.45f, 0.95f));
+    if (open > 0.0f && fill < 1.0f) {
+        const float half = tile * 0.5f * (0.18f + 0.82f * open);
+        const float rot = (1.0f - open) * kPi34 * 0.75f;
+        std::vector<Math::Vector2> square;
+        for (int i = 0; i < 4; ++i) {
+            float a = rot + kPi34 * 0.25f + i * kPi34 * 0.5f;
+            square.push_back({c.x + std::cos(a) * half * 1.41421f, c.y + std::sin(a) * half * 1.41421f});
+        }
+        ui.DrawPolygon(square, UI::WithAlpha(colors.Accent, open * (1.0f - fill) * fade), 2.0f);
+    }
+    if (fill > 0.0f) {
+        if (fill < 1.0f) {
+            const float s = tile * fill;
+            ui.FillRoundedRect({c.x - s * 0.5f, c.y - s * 0.5f}, {s, s}, s * 0.28f, UI::WithAlpha(colors.Accent, fade));
+        } else {
+            ui.DrawLogoMark({c.x - tile * 0.5f, c.y - tile * 0.5f}, tile, Phase34(t, 0.80f, 1.55f), fade);
+        }
+    }
+    const float orbit = EaseOut34(Phase34(t, 1.00f, 1.60f));
+    if (orbit > 0.0f) {
+        const float spin = t * 2.4f;
+        const float r1 = tile * 0.5f + 16.0f + (1.0f - orbit) * 10.0f;
+        const float r2 = tile * 0.5f + 25.0f + (1.0f - orbit) * 16.0f;
+        const D2D1_COLOR_F inner = UI::WithAlpha(colors.Accent, 0.9f * orbit * fade);
+        ui.DrawArc(c, r1, -kPi34 * 0.85f + spin, kPi34 * 0.62f * orbit, inner, 2.5f);
+        ui.DrawArc(c, r1, kPi34 * 0.15f + spin, kPi34 * 0.62f * orbit, inner, 2.5f);
+        ui.DrawArc(c, r2, kPi34 * 0.40f - spin * 0.7f, kPi34 * 0.45f * orbit, UI::WithAlpha(colors.Accent, 0.35f * orbit * fade), 1.5f);
+    }
+    const float word = EaseOut34(Phase34(t, 1.20f, 1.70f));
+    if (word > 0.0f) {
+        const float wy = 246.0f + lift + (1.0f - word) * 10.0f;
+        const float wordW = ui.MeasureText(L"CiyE", UI::FontTitle);
+        const float x = c.x - wordW * 0.5f;
+        ui.DrawText(L"CiyE", {x, wy}, {wordW + 2.0f, 30.0f}, UI::WithAlpha(colors.TextPrimary, word * fade), UI::FontTitle);
+        const float sub = EaseOut34(Phase34(t, 1.35f, 1.85f));
+        ui.DrawText(L"BloodStrike internal", {c.x - 140.0f, wy + 30.0f}, {280.0f, 18.0f},
+            UI::WithAlpha(colors.TextTertiary, sub * fade), UI::FontSmall, DWRITE_TEXT_ALIGNMENT_CENTER);
+    }
+    const float bar = EaseOut34(Phase34(t, 1.45f, 1.85f));
+    if (bar > 0.0f) {
+        const float barW = 220.0f;
+        const float by = 328.0f + lift;
+        const float progress = EaseInOut34(Phase34(t, 1.55f, 2.75f));
+        ui.FillRoundedRect({c.x - barW * 0.5f, by}, {barW, 3.0f}, 1.5f, UI::WithAlpha(colors.BorderSubtle, colors.BorderSubtle.a * bar * fade));
+        if (progress > 0.0f) {
+            ui.FillRoundedRect({c.x - barW * 0.5f, by}, {barW * progress, 3.0f}, 1.5f, UI::WithAlpha(colors.Accent, bar * fade));
+        }
+        const wchar_t* status = progress < 0.45f ? L"Loading interface" : (progress < 0.97f ? L"Preparing startup" : L"Opening loader");
+        ui.DrawText(status, {c.x - 140.0f, by + 12.0f}, {280.0f, 18.0f},
+            UI::WithAlpha(colors.TextSecondary, bar * fade), UI::FontSmall, DWRITE_TEXT_ALIGNMENT_CENTER);
+    }
+}
+
+void RenderTitleButtons34() {
+    auto& ui = UI::g_UI;
+    const float W = kWindowW;
+    if (ui.RenderIconButton({W - 80.0f, 8.0f}, {32.0f, 28.0f}, UI::Icon::Minimize)) {
+        ShowWindow(g_hwnd, SW_MINIMIZE);
+    }
+    if (ui.RenderIconButton({W - 44.0f, 8.0f}, {32.0f, 28.0f}, UI::Icon::Close, true)) {
+        g_running = false;
+    }
+}
+
+bool g_launch_requested = false;
+
+// Pump pipeline forward based on actual bs-cheat phase from InjectWorker.
+// Step indices depend on mode: user = [Payload, BloodStrike, Inject]; kernel = [Payload, Driver, BloodStrike, Inject].
+void SyncStepsFromPhase() {
+    int phase = g_phase.load();
+    const bool driver = g_driver_mode.load();
+    const int idxPayload = 0;
+    const int idxDriver = driver ? 1 : -1;
+    const int idxProc = driver ? 2 : 1;
+    const int idxInject = driver ? 3 : 2;
+    const int total = (int)g_steps.size();
+
+    auto advance = [&](int target, float progress) {
+        if (g_current_step <= target) {
+            g_steps[g_current_step].Status = StepCompleted;
+            g_current_step = target + 1;
+            if (g_current_step < total) g_steps[g_current_step].Status = StepWorking;
+            g_target_progress = progress;
+        }
+    };
+
+    if (g_current_step == idxPayload && phase != kIdle) {
+        g_steps[idxPayload].Detail = L"Embedded modules ready";
+        advance(idxPayload, driver ? 0.2f : 0.3f);
+    }
+    if (idxDriver >= 0 && g_current_step == idxDriver && phase == kInjecting) {
+        g_steps[idxDriver].Detail = g_used_driver.load() ? L"Kernel driver ready" : L"Driver skipped";
+        advance(idxDriver, 0.45f);
+    }
+    if (g_current_step == idxProc) {
+        DWORD pid = g_pid.load();
+        if (pid) {
+            wchar_t buf[48]; swprintf_s(buf, L"Attached PID %lu", (unsigned long)pid);
+            g_steps[idxProc].Detail = buf;
+            advance(idxProc, 0.75f);
+        }
+    }
+    if (g_current_step == idxInject && phase == kReady) {
+        g_steps[idxInject].Detail = g_used_driver.load() ? L"Mapped via driver" : L"Overlay injected";
+        advance(idxInject, 1.0f);
+    }
+    if (phase == kFailed) {
+        for (int i = 0; i < total; ++i) {
+            if (g_steps[i].Status == StepWorking) {
+                g_steps[i].Status = StepFailed;
+                g_steps[i].Detail = L"See activity log";
+                break;
+            }
+        }
+    }
+}
+
+void RenderFrame34() {
+    auto& ui = UI::g_UI;
+    const auto& colors = ui.GetColors();
+    const float W = kWindowW;
+    const float H = kWindowH;
+
+    ui.FillRect({0, 0}, {W, H}, colors.BgBase);
+
+    // Title strip
+    const float logoW = ui.DrawLogo({20.0f, 11.0f}, 22.0f);
+    (void)logoW;
+    {
+        const std::wstring tag = std::wstring(kVersionW);
+        const float tagW = ui.MeasureText(tag, UI::FontSmall) + 14.0f;
+        const Math::Vector2 tagPos{20.0f + logoW + 10.0f, 13.0f};
+        ui.FillRoundedRect(tagPos, {tagW, 18.0f}, 9.0f, colors.BgElevated);
+        ui.DrawText(tag, tagPos, {tagW, 18.0f}, colors.TextTertiary, UI::FontSmall, DWRITE_TEXT_ALIGNMENT_CENTER);
+    }
+    ui.DrawLine({0, kTitlebarH}, {W, kTitlebarH}, colors.BorderSubtle, 1.0f);
+    RenderTitleButtons34();
+
+    const int phase = g_phase.load();
+    const bool ready = phase == kReady;
+    const bool failed = phase == kFailed;
+    const bool busy = g_busy.load();
+
+    const float leftX = 28.0f;
+    const float leftW = 268.0f;
+
+    std::wstring headline, line;
+    if (failed) { headline = L"Setup stopped"; line = L"See the red step on the right."; }
+    else if (ready) { headline = L"Session ready"; line = L"Press INSERT in game to open the menu."; }
+    else if (g_current_step == 2) { headline = L"Waiting for BloodStrike"; line = L"Start Blood Strike to continue."; }
+    else if (busy) { headline = L"Starting session"; line = L"This takes a few seconds."; }
+    else { headline = L"Ready when you are"; line = L"Choose a mode and start the session."; }
+
+    g_shown_progress = ui.Animate(UI::HashId(L"loader.progress"), 0, g_target_progress, 8.0f);
+
+    RenderStatusMark34({leftX, 66.0f}, 40.0f, ready, failed);
+    ui.DrawText(headline, {leftX, 120.0f}, {leftW, 30.0f}, colors.TextPrimary, UI::FontTitle);
+    ui.DrawText(line, {leftX, 152.0f}, {leftW, 20.0f}, colors.TextSecondary, UI::FontBody);
+
+    auto factRow = [&](float y, const std::wstring& label, const std::wstring& value) {
+        ui.DrawLine({leftX, y}, {leftX + leftW, y}, colors.BorderSubtle, 1.0f);
+        ui.DrawText(label, {leftX, y + 1.0f}, {110.0f, 32.0f}, colors.TextTertiary, UI::FontBody);
+        ui.DrawText(value, {leftX + 110.0f, y + 1.0f}, {leftW - 110.0f, 32.0f}, colors.TextPrimary, UI::FontMono, DWRITE_TEXT_ALIGNMENT_TRAILING);
+    };
+    const bool driver = g_driver_mode.load();
+    DWORD live = g_live_pid.load();
+    DWORD pid = g_pid.load(); if (!pid) pid = live;
+    factRow(190.0f, L"Mode", driver ? L"Kernel" : L"User");
+    factRow(223.0f, L"Device", g_hwid);
+    factRow(256.0f, L"Process", pid ? (L"PID " + std::to_wstring(pid)) : L"Not found");
+    ui.DrawLine({leftX, 289.0f}, {leftX + leftW, 289.0f}, colors.BorderSubtle, 1.0f);
+
+    // Mode switch (pill)
+    const Math::Vector2 modeBtnSize{(leftW - 10.0f) * 0.5f, 32.0f};
+    const float modeY = 304.0f;
+    if (!busy) {
+        bool prevDriver = driver;
+        if (ui.RenderButton({leftX, modeY}, modeBtnSize, L"User", !driver)) g_driver_mode.store(false);
+        if (ui.RenderButton({leftX + modeBtnSize.x + 10.0f, modeY}, modeBtnSize, L"Kernel", driver)) g_driver_mode.store(true);
+        if (g_driver_mode.load() != prevDriver) BuildSteps(g_driver_mode.load());
+    } else {
+        ui.FillRoundedRect({leftX, modeY}, modeBtnSize, 6.0f, colors.BgElevated);
+        ui.DrawText(L"User", {leftX, modeY}, modeBtnSize, driver ? colors.TextTertiary : colors.TextPrimary, UI::FontBold, DWRITE_TEXT_ALIGNMENT_CENTER);
+        ui.FillRoundedRect({leftX + modeBtnSize.x + 10.0f, modeY}, modeBtnSize, 6.0f, colors.BgElevated);
+        ui.DrawText(L"Kernel", {leftX + modeBtnSize.x + 10.0f, modeY}, modeBtnSize, driver ? colors.TextPrimary : colors.TextTertiary, UI::FontBold, DWRITE_TEXT_ALIGNMENT_CENTER);
+    }
+
+    // Progress block (anchored just above the start button)
+    const float btnH = 42.0f;
+    const float btnY = H - btnH - 20.0f;
+    const float barY = btnY - 22.0f;
+    const float pctY = barY - 22.0f;
+
+    std::wstringstream pct;
+    pct << static_cast<int>(std::round(g_shown_progress * 100.0f)) << L"%";
+    ui.DrawText(L"Progress", {leftX, pctY}, {leftW - 70.0f, 16.0f}, colors.TextTertiary, UI::FontSmall);
+    ui.DrawText(pct.str(), {leftX + leftW - 70.0f, pctY}, {70.0f, 16.0f},
+        failed ? colors.Danger : (ready ? colors.Success : colors.TextSecondary), UI::FontMono, DWRITE_TEXT_ALIGNMENT_TRAILING);
+    ui.RenderProgressBar({leftX, barY}, {leftW, 4.0f}, g_shown_progress, ready ? colors.Success : colors.Accent);
+
+    std::wstring buttonLabel = failed ? L"Close" : (ready ? L"Close loader" : (busy ? L"Working..." : L"Start session"));
+    bool canPress = !busy || ready || failed;
+    if (ui.RenderButton({leftX, btnY}, {leftW, btnH}, buttonLabel, true, canPress)) {
+        if (failed || ready) {
+            g_running = false;
+        } else if (!busy) {
+            bool dm = g_driver_mode.load();
+            g_used_driver.store(dm);
+            std::thread(InjectWorker, dm).detach();
+        }
+    }
+
+    // Right panel: pipeline
+    const float panelX = leftX + leftW + 32.0f;
+    const float panelY = 58.0f;
+    const float panelW = W - panelX - 16.0f;
+    const float panelH = H - panelY - 16.0f;
+    ui.FillRoundedRect({panelX, panelY}, {panelW, panelH}, 10.0f, colors.BgSurface);
+    ui.DrawRoundedRect({panelX, panelY}, {panelW, panelH}, 10.0f, colors.BorderSubtle, 1.0f);
+
+    ui.DrawText(L"Startup", {panelX + 20.0f, panelY + 16.0f}, {160.0f, 20.0f}, colors.TextPrimary, UI::FontHeader);
+    const int total = (int)g_steps.size();
+    const std::wstring counter = ready ? L"Done"
+        : std::to_wstring((std::min)(g_current_step + 1, total)) + L" of " + std::to_wstring(total);
+    ui.DrawText(counter, {panelX + panelW - 120.0f, panelY + 18.0f}, {100.0f, 18.0f},
+        ready ? colors.Success : colors.TextTertiary, UI::FontMono, DWRITE_TEXT_ALIGNMENT_TRAILING);
+    ui.DrawLine({panelX + 20.0f, panelY + 46.0f}, {panelX + panelW - 20.0f, panelY + 46.0f}, colors.BorderSubtle, 1.0f);
+
+    float stepY = panelY + 62.0f;
+    for (size_t i = 0; i < g_steps.size(); ++i) {
+        RenderStep34(g_steps[i], {panelX + 20.0f, stepY}, panelW - 40.0f, i + 1 == g_steps.size());
+        stepY += 58.0f;
+    }
+
+    // Activity log (last 3 lines)
+    std::vector<std::string> lines;
+    { std::lock_guard<std::mutex> lk(g_log_mutex);
+      size_t n = (std::min)(g_log_lines.size(), (size_t)3);
+      lines.assign(g_log_lines.end() - (ptrdiff_t)n, g_log_lines.end());
+    }
+    float logY = panelY + panelH - 68.0f;
+    ui.DrawLine({panelX + 20.0f, logY - 8.0f}, {panelX + panelW - 20.0f, logY - 8.0f}, colors.BorderSubtle, 1.0f);
+    for (const auto& ln : lines) {
+        ui.DrawText(Utf8ToWideL(ln), {panelX + 20.0f, logY}, {panelW - 40.0f, 16.0f}, colors.TextTertiary, UI::FontSmall);
+        logY += 16.0f;
+    }
+}
+
+LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) {
+    switch (msg) {
+        case WM_NCHITTEST: {
+            POINT pt{GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam)};
+            ScreenToClient(hwnd, &pt);
+            if (pt.y >= 0 && pt.y < (int)kTitlebarH && pt.x < (int)(kWindowW - kTitlebarButtonsW)) {
+                return HTCAPTION;
+            }
+            return HTCLIENT;
+        }
+        case WM_MOUSEWHEEL:
+            UI::g_UI.AddWheel((float)GET_WHEEL_DELTA_WPARAM(wparam) / WHEEL_DELTA);
+            return 0;
+        case WM_CHAR:
+            UI::g_UI.AddCharacter((wchar_t)wparam);
+            return 0;
+        case WM_KEYDOWN:
+            if (wparam == VK_ESCAPE) g_running = false;
+            return 0;
+        case WM_SIZE:
+            if (wparam != SIZE_MINIMIZED && g_device && g_swap) {
+                CleanupRenderTarget();
+                g_swap->ResizeBuffers(0, (UINT)LOWORD(lparam), (UINT)HIWORD(lparam), DXGI_FORMAT_UNKNOWN, 0);
+                CreateRenderTarget();
+            }
+            return 0;
+        case WM_SYSCOMMAND:
+            if ((wparam & 0xfff0) == SC_KEYMENU) return 0;
+            break;
+        case WM_CLOSE:
+            g_running = false;
+            DestroyWindow(hwnd);
+            return 0;
+        case WM_DESTROY:
+            PostQuitMessage(0);
+            return 0;
+        default:
+            break;
+    }
+    return DefWindowProcW(hwnd, msg, wparam, lparam);
+}
+
+}  // namespace
+
+int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
+    WNDCLASSEXW wc{};
+    wc.cbSize = sizeof(wc);
+    wc.style = CS_HREDRAW | CS_VREDRAW;
+    wc.lpfnWndProc = WndProc;
+    wc.hInstance = instance;
+    wc.hCursor = LoadCursorW(nullptr, (LPCWSTR)IDC_ARROW);
+    wc.hIcon = (HICON)LoadImageW(instance, MAKEINTRESOURCEW(101), IMAGE_ICON,
+        GetSystemMetrics(SM_CXICON), GetSystemMetrics(SM_CYICON), LR_DEFAULTCOLOR);
+    wc.hIconSm = (HICON)LoadImageW(instance, MAKEINTRESOURCEW(101), IMAGE_ICON,
+        GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON), LR_DEFAULTCOLOR);
+    wc.lpszClassName = L"CiyELoaderWindow34";
+    RegisterClassExW(&wc);
+
+    int screen_w = GetSystemMetrics(SM_CXSCREEN);
+    int screen_h = GetSystemMetrics(SM_CYSCREEN);
+    int pos_x = (screen_w - (int)kWindowW) / 2;
+    int pos_y = (screen_h - (int)kWindowH) / 2;
+
+    g_hwnd = CreateWindowExW(WS_EX_APPWINDOW, wc.lpszClassName, L"CiyE",
+                             WS_POPUP | WS_MINIMIZEBOX,
+                             pos_x, pos_y, (int)kWindowW, (int)kWindowH,
+                             nullptr, nullptr, instance, nullptr);
+    if (!g_hwnd) return 1;
+
+    MARGINS margins = {1, 1, 1, 1};
+    DwmExtendFrameIntoClientArea(g_hwnd, &margins);
+    const DWORD cornerPref = 33;
+    int round = 2;
+    DwmSetWindowAttribute(g_hwnd, cornerPref, &round, sizeof(round));
+    BOOL dark = TRUE;
+    DwmSetWindowAttribute(g_hwnd, 20, &dark, sizeof(dark));
+
+    ShowWindow(g_hwnd, SW_SHOWDEFAULT);
+    UpdateWindow(g_hwnd);
+
+    if (!CreateDeviceD3D(g_hwnd)) {
+        CleanupDeviceD3D();
+        DestroyWindow(g_hwnd);
+        return 1;
+    }
+    if (!UI::g_UI.Initialize(g_swap)) {
+        CleanupDeviceD3D();
+        DestroyWindow(g_hwnd);
+        return 1;
+    }
+
+    InitSteps();
+    Log("CiyE loader ready.");
+
+    while (g_running) {
+        MSG msg;
+        while (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) {
+            TranslateMessage(&msg);
+            DispatchMessageW(&msg);
+            if (msg.message == WM_QUIT) g_running = false;
+        }
+        if (!g_running) break;
+        if (IsIconic(g_hwnd)) {
+            Sleep(10);
+            continue;
+        }
+
+        // Auto-scan for the game while idle.
+        static DWORD last_scan = 0;
+        DWORD now_tick = GetTickCount();
+        if (!g_busy.load() && now_tick - last_scan > 800) {
+            last_scan = now_tick;
+            DWORD found = FindProcess(kGame);
+            g_live_pid.store(found);
+            if (!found) g_pid.store(0);
+        }
+        if (g_auto_inject.load() && !g_busy.load() && g_phase.load() == kIdle && g_live_pid.load()) {
+            bool dm = g_driver_mode.load();
+            g_used_driver.store(dm);
+            g_busy.store(true);
+            std::thread(InjectWorker, dm).detach();
+        }
+
+        SyncStepsFromPhase();
+
+        POINT mp{};
+        GetCursorPos(&mp);
+        ScreenToClient(g_hwnd, &mp);
+        bool mdown = (GetForegroundWindow() == g_hwnd) && (GetAsyncKeyState(VK_LBUTTON) & 0x8000) != 0;
+        Math::Vector2 mouse{(float)mp.x, (float)mp.y};
+
+        if (!g_intro_done) {
+            g_intro_time += UI::g_UI.DeltaTime();
+            if (g_intro_time >= kIntroEnd34) g_intro_done = true;
+        }
+        const bool inIntro = !g_intro_done;
+        const float exitP = inIntro ? Phase34(g_intro_time, kIntroExit34, kIntroEnd34) : 0.0f;
+        const bool pointerLive = !inIntro ||
+            (mouse.y < kTitlebarH && mouse.x >= kWindowW - kTitlebarButtonsW);
+        UI::g_UI.UpdateInput(pointerLive ? mouse : Math::Vector2{-1000.0f, -1000.0f}, pointerLive && mdown);
+
+        const auto& bg = UI::g_UI.GetColors().BgBase;
+        const float clearColor[4] = {bg.r, bg.g, bg.b, 1.0f};
+        g_context->OMSetRenderTargets(1, &g_rtv, nullptr);
+        g_context->ClearRenderTargetView(g_rtv, clearColor);
+
+        UI::g_UI.BeginDraw();
+        if (!inIntro || exitP > 0.0f) RenderFrame34();
+        if (inIntro) {
+            RenderIntro34(exitP);
+            RenderTitleButtons34();
+        }
+        UI::g_UI.RenderPopups();
+        UI::g_UI.EndDraw();
+        g_swap->Present(1, 0);
+
+        if (g_close_on_done.load() && g_phase.load() == kReady) {
+            static bool posted = false;
+            if (!posted) { posted = true; PostMessageW(g_hwnd, WM_CLOSE, 0, 0); }
+        }
+    }
+
+    UI::g_UI.Shutdown();
+    CleanupDeviceD3D();
+    DestroyWindow(g_hwnd);
+    UnregisterClassW(wc.lpszClassName, instance);
+    return 0;
+}
+
+// --- dead code below (kept to preserve old helpers if ever referenced) ---
+#if 0
 void DrawCard(ImDrawList* dl, ImVec2 p, ImVec2 size, const char* label, const char* value,
               ImU32 color, ImFont* font, float font_size) {
     dl->AddRectFilled(p, ImVec2(p.x + size.x, p.y + size.y), IM_COL32(17, 21, 31, 255), S(12));
@@ -871,7 +1398,11 @@ void RenderUI() {
     const float margin = S(28), left = S(264), gap = S(32), right_x = margin + left + gap;
     CiyEUi::Logo(dl, ImVec2(wp.x + S(20), wp.y + S(12)), S(22));
     dl->AddText(g_font_med, S(13), ImVec2(wp.x + S(54), wp.y + S(15)), kText, kBrand);
-    dl->AddText(g_font_small, S(11.5f), ImVec2(wp.x + ws.x - S(55), wp.y + S(16)), kMuted, kVersion);
+    const float badge_x = S(54) + g_font_med->CalcTextSizeA(S(13), FLT_MAX, 0, kBrand).x + S(10);
+    const float badge_w = g_font_small->CalcTextSizeA(S(11.5f), FLT_MAX, 0, kVersion).x + S(14);
+    dl->AddRectFilled(ImVec2(wp.x+badge_x,wp.y+S(13)),ImVec2(wp.x+badge_x+badge_w,wp.y+S(31)),CiyEUi::Elevated,S(9));
+    dl->AddText(g_font_small,S(11.5f),ImVec2(wp.x+badge_x+S(7),wp.y+S(16)),kMuted,kVersion);
+    dl->AddLine(ImVec2(wp.x,wp.y+S(44)),ImVec2(wp.x+ws.x,wp.y+S(44)),CiyEUi::Border);
     static DWORD last_scan = 0;
     DWORD now_tick = GetTickCount();
     if (!g_busy.load() && now_tick - last_scan > 800) {
@@ -886,10 +1417,10 @@ void RenderUI() {
     const int phase = g_phase.load();
     unsigned long pid = g_pid.load(); if (!pid) pid = g_live_pid.load();
     const char* title = phase == kReady ? "Session ready" : phase == kFailed ? "Session needs attention" : busy ? "Starting session" : "Ready when you are";
-    CiyEUi::Logo(dl, ImVec2(wp.x + margin, wp.y + S(64)), S(48));
-    dl->AddCircle(ImVec2(wp.x + margin + S(24), wp.y + S(88)), S(27), PhaseColor(phase), 48, S(1.25f));
-    dl->AddText(g_font_bold, S(20), ImVec2(wp.x + margin, wp.y + S(128)), kText, title);
-    dl->AddText(g_font, S(13), ImVec2(wp.x + margin, wp.y + S(158)), kMuted, "Blood Strike");
+    CiyEUi::Logo(dl, ImVec2(wp.x + margin, wp.y + S(66)), S(40));
+    dl->AddCircle(ImVec2(wp.x + margin + S(20), wp.y + S(86)), S(25), PhaseColor(phase), 48, S(1.25f));
+    dl->AddText(g_font_bold, S(20), ImVec2(wp.x + margin, wp.y + S(120)), kText, title);
+    dl->AddText(g_font, S(13), ImVec2(wp.x + margin, wp.y + S(152)), kMuted, "Blood Strike");
     dl->AddLine(ImVec2(wp.x + margin, wp.y + S(190)), ImVec2(wp.x + margin + left, wp.y + S(190)), CiyEUi::Border);
     ImGui::SetCursorPos(ImVec2(margin, S(203)));
     ImGui::TextDisabled("Launch mode"); ImGui::SameLine(S(170));
@@ -924,6 +1455,8 @@ void RenderUI() {
     ImGui::TextUnformatted("Startup");
     ImGui::PopFont();
     ImGui::Dummy(ImVec2(0, S(14)));
+    ImGui::Separator();
+    ImGui::Dummy(ImVec2(0, S(16)));
     auto status_row = [&](const char* label, const char* detail, ImU32 color, bool last = false) {
         const float row_y = ImGui::GetCursorPosY();
         ImVec2 pos = ImGui::GetCursorScreenPos();
@@ -1113,11 +1646,6 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
         g_swap->Present(1, 0);
     }
 
-    ImGui_ImplDX11_Shutdown();
-    ImGui_ImplWin32_Shutdown();
-    ImGui::DestroyContext();
-    CleanupDeviceD3D();
-    DestroyWindow(g_hwnd);
-    UnregisterClassW(wc.lpszClassName, instance);
     return 0;
 }
+#endif

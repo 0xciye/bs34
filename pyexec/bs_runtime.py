@@ -38,12 +38,12 @@ ERR_PATH = os.path.join(IPC_DIR, 'runtime_err.txt')
 CFG_MAGIC = 0x42534346
 STATE_MAGIC = 0x42535331
 CATALOG_MAGIC = 0x42534354
-VERSION = 6
+VERSION = 7
 MAX_ENTITIES = 128
 
-CFG_FMT = '<IIIIIiIiiifffffiiI' + 'I' * 13 + 'f' + 'I' * 8
+CFG_FMT = '<IIIIIiIiIifffffiiI' + 'I' * 13 + 'f' + 'I' * 8
 STATE_FMT = '<IIIIQ14fBBH'
-ENT_FMT = '<Q40s32s3f3f2f2f3fi4BI32f'
+ENT_FMT = '<Q40s32s3f3f2f2f5fi4BI32f'
 CAT_HEAD_FMT = '<IIII'
 CAT_ENTRY_FMT = '<IIII48s'
 
@@ -58,7 +58,7 @@ MAX_GUN = 65536
 
 assert CFG_SIZE == 160
 assert STATE_HEAD_SIZE == 84
-assert ENT_SIZE == 272
+assert ENT_SIZE == 280
 assert CAT_ENTRY_SIZE == 64
 
 IDX_MAGIC = 0
@@ -68,16 +68,16 @@ IDX_FLAGS = 3
 IDX_APPLY_SEQ = 4
 IDX_APPLY_TYPE = 5
 IDX_APPLY_ITEM = 6
-IDX_AIM_KEY = 7
-IDX_FLICK_KEY = 8
+IDX_TRACK_KEY = 7
+IDX_COL_FOV = 8
 IDX_MENU_KEY = 9
-IDX_AIM_FOV = 10
-IDX_AIM_SMOOTH = 11
-IDX_AIM_MAX_DIST = 12
-IDX_FLICK_FOV = 13
+IDX_TRACK_FOV = 10
+IDX_TRACK_SMOOTH = 11
+IDX_TRACK_MAX_DIST = 12
+IDX_HUMAN_SMOOTH = 13
 IDX_HUMANIZE = 14
-IDX_AIM_BONE = 15
-IDX_ESP_MAX_DIST = 16
+IDX_TRACK_JOINT = 15
+IDX_RENDER_MAX_DIST = 16
 IDX_OPTIONS = 17
 IDX_COL_BOX = 18
 IDX_COL_BOX_HIDDEN = 19
@@ -91,58 +91,67 @@ IDX_COL_DIST = 26
 IDX_COL_HEALTH = 27
 IDX_COL_HEADDOT = 28
 IDX_COL_COUNT = 29
-IDX_ESP_STYLE = 30
+IDX_RENDER_STYLE = 30
 IDX_BOX_THICK = 31
 IDX_SKIN_HERO = 32
 IDX_SKIN_GUN = 33
 IDX_SKIN_KNIFE = 34
 IDX_AUTO_SKIN = 35
+IDX_COL_ARMOR = 36
 
-OPT_AIM_TOGGLE = 1 << 0
+OPT_TRACK_TOGGLE = 1 << 0
+OPT_TRACK_IGNORE_DOWNED = 1 << 1
+OPT_TRACK_JOINTS_SET = 1 << 2
+OPT_RAY_REDIRECT = 1 << 5
+OPT_TRACK_HEAD = 1 << 8
+OPT_TRACK_NECK = 1 << 9
+OPT_TRACK_BODY = 1 << 10
+F_TRACK_MULTIPOINT = 1 << 24
 
 F_MENU_OPEN = 1 << 0
-F_ESP = 1 << 1
-F_ESP_BOX = 1 << 2
-F_ESP_SKELETON = 1 << 3
-F_ESP_LINE = 1 << 4
-F_ESP_NAME = 1 << 5
-F_ESP_GUN = 1 << 6
-F_ESP_DISTANCE = 1 << 7
-F_ESP_HEALTH = 1 << 8
-F_ESP_HEADDOT = 1 << 9
-F_ESP_TEAM = 1 << 10
-F_ESP_VISIBLE = 1 << 11
-F_ESP_COUNT = 1 << 12
-F_AIM = 1 << 13
-F_AIM_VISIBLE = 1 << 14
-F_AIM_TEAM = 1 << 15
-F_AIM_FOV_CIRCLE = 1 << 16
-F_AIM_HUMANIZE = 1 << 17
-F_FLICK = 1 << 18
-F_FLICK_FIRE = 1 << 19
+F_RENDER_ENTITIES = 1 << 1
+F_RENDER_BOUNDS = 1 << 2
+F_RENDER_SKELETON = 1 << 3
+F_RENDER_TRACER = 1 << 4
+F_RENDER_LABEL = 1 << 5
+F_RENDER_EQUIPMENT = 1 << 6
+F_RENDER_RANGE = 1 << 7
+F_RENDER_VITALITY = 1 << 8
+F_RENDER_HEAD_MARKER = 1 << 9
+F_RENDER_FACTION = 1 << 10
+F_RENDER_OCCLUSION = 1 << 11
+F_RENDER_SUMMARY = 1 << 12
+F_TRACK_VIEW = 1 << 13
+F_TRACK_OCCLUSION = 1 << 14
+F_TRACK_FACTION = 1 << 15
+F_TRACK_FOV_INDICATOR = 1 << 16
+F_TRACK_HUMANIZE = 1 << 17
+F_TRACK_LEAD = 1 << 18
+F_RENDER_SHIELD = 1 << 19
 F_UNLOCK_EFFECTS = 1 << 20
 F_BLOCK_REPORT = 1 << 21
 F_SKIN_CURRENT = 1 << 22
-F_RECOIL = 1 << 23
-F_FLICK_FOV_CIRCLE = 1 << 24
+F_DAMP_IMPULSE = 1 << 23
+F_STREAM_PROOF = 1 << 25
+F_EXIT_CHEAT = 1 << 26
 
-DEFAULT_FLAGS = (F_MENU_OPEN | F_ESP | F_ESP_BOX | F_ESP_NAME | F_ESP_DISTANCE |
-                 F_ESP_HEALTH | F_ESP_HEADDOT | F_AIM_FOV_CIRCLE |
+DEFAULT_FLAGS = (F_MENU_OPEN | F_RENDER_ENTITIES | F_RENDER_BOUNDS | F_RENDER_LABEL | F_RENDER_RANGE |
+                 F_RENDER_VITALITY | F_RENDER_SHIELD | F_RENDER_HEAD_MARKER | F_TRACK_FOV_INDICATOR |
                  F_UNLOCK_EFFECTS | F_BLOCK_REPORT | F_SKIN_CURRENT |
-                 F_RECOIL | F_ESP_COUNT | (1 << 27) | (1 << 28) | (1 << 29) | (1 << 30))
+                 F_DAMP_IMPULSE | F_RENDER_SUMMARY | (1 << 27) | (1 << 28) | (1 << 29) | (1 << 30))
 
 DEFAULT_CFG = (
     CFG_MAGIC, VERSION, 0, DEFAULT_FLAGS,
     0, 0, 0,
-    0x02, 0x05, 0x2D,
-    8.0, 0.35, 400.0, 15.0, 0.90,
-    0, 400, 0,
+    0x02, 0xB4FFA259, 0x2D,
+    8.0, 0.35, 400.0, 0.5, 0.90,
+    0, 400, OPT_TRACK_JOINTS_SET | OPT_TRACK_HEAD | (1 << 4),
     4036750176, 3948567280, 3707742810, 3947940095,
     3952864096, 3198316889, 4294045164, 3957250262,
     4040674760, 4036750176, 3959422975, 4288408416,
     0, 1.5,
     0, 0, 0, 1,
-    0, 0, 0, 0,
+    4043289680, 0, 0, 0,
 )
 
 _runtime = None
@@ -155,27 +164,30 @@ _last_err = 0.0
 _flick_prev = False
 _last_flick = 0.0
 _fire_release_at = 0.0
-_aim_prev = False
-_aim_latched = False
-_aim_hold_until = 0.0
-_aim_diag_t = 0.0
-_aim_fallback_n = 0
-_aim_sign_y = -1.0
-_aim_sign_p = -1.0
-_aim_sign_ready = False
-_aim_eid = None
-_aim_eid_t = 0.0
-_aim_hold_log_t = 0.0
+_track_prev = False
+_track_latched = False
+_track_hold_until = 0.0
+_track_diag_t = 0.0
+_track_fallback_n = 0
+_track_sign_y = -1.0
+_track_sign_p = -1.0
+_track_sign_ready = False
+_track_eid = None
+_track_eid_t = 0.0
+_track_hold_log_t = 0.0
 _perf_t = 0.0
 _perf_last = 0.0
 _state_file_t = 0.0
 _g_log_t = 0.0
 _g_slow = 0.0
 _flick_queue = None
-_aim_busy = False
+_track_busy = False
 _jit_t = 0.0
-_recoil_t = 0.0
-_recoil_grace = 0.0
+_impulse_t = 0.0
+_impulse_grace = 0.0
+_impulse_hooks = None
+_ray_target = None
+_ray_hook = None
 _vis_cache = {}
 _melee_cache = {}
 _gather_cache = (0.0, None, None, [])
@@ -287,7 +299,7 @@ def _options(cfg):
 
 
 def _get_track_mode_toggle(cfg):
-    return bool(_options(cfg) & OPT_AIM_TOGGLE)
+    return bool(_options(cfg) & OPT_TRACK_TOGGLE)
 
 
 def _view_snap_smooth(cfg):
@@ -790,13 +802,15 @@ def _index_item_templates():
     import gclient.data.gun_skin_template_data as gun
     heroes, guns = {}, {}
     template_items = {}
-    levels = {}
+    levels, roots, catalog_items = {}, {}, {}
     try:
         import gclient.data.lobby_item_upgrade_data as upgrades
-        for group in upgrades.data.values():
+        for root, group in upgrades.data.items():
             for level, entry in group.items():
                 if entry.get('item_id'):
-                    levels[int(entry['item_id'])] = int(level)
+                    iid = int(entry['item_id'])
+                    levels[iid] = int(level)
+                    roots[iid] = int(root)
     except ImportError:
         pass
     _model_to_hero.clear()
@@ -820,21 +834,27 @@ def _index_item_templates():
                 continue
             if int(proto.get('quality') or 0) < 4:
                 continue
-            typ = 2 if subtype in (510, 520, 530, 540, 550, 560) else 3 if subtype in (201, 202, 203, 206, 207) else 0
+            typ = 2 if subtype in (510, 520, 530, 540, 550, 560) else 3 if subtype in (201, 202, 203, 206, 207, 210) else 0
             if not typ:
                 continue
             tid = int((proto.get('guise') or {}).get('template_id') or 0)
             template = gun.data.get(tid)
-            if template is None:
+            if template is None and subtype != 210:
                 continue
             gid = int(template.get('gun_id') or 0) if typ == 2 else subtype * 100 + 2
             if not (0 < gid <= 0xFFFFFFFF and 0 < tid <= 0xFFFFFFFF):
                 continue
             key = (typ, tid)
-            if key not in template_items or iid < int(template_items[key]['id']):
+            rank = (levels.get(iid, 0) if typ == 2 else 0, -iid)
+            previous = template_items.get(key)
+            if previous is None or rank > (levels.get(int(previous['id']), 0) if typ == 2 else 0, -int(previous['id'])):
                 template_items[key] = proto
+            # Retain every template mapping for previously saved selections.
+            catalog_key = (typ, roots.get(iid, 0), 0 if iid in roots else tid) if typ == 2 else key
+            if catalog_key not in catalog_items or rank > catalog_items[catalog_key]:
+                catalog_items[catalog_key] = rank
                 label = name + (' [Lv %d]' % levels[iid] if iid in levels else '')
-                guns[key] = (tid, gid, int(proto['quality']), 1 if typ == 2 else 2, _bytes(label, 48))
+                guns[catalog_key] = (tid, gid, int(proto['quality']), 1 if typ == 2 else 2, _bytes(label, 48))
         except (KeyError, TypeError, ValueError):
             continue
     _skin_selection.template_items = template_items
@@ -1638,6 +1658,8 @@ def _local():
     if p is not None:
         av = _call_attr(p, ('combat_avatar', 'main_avatar', 'avatar', 'entity', 'controlled_entity',
                             'GetCombatAvatar', 'GetMainAvatar', 'GetAvatar'))
+    if av is None and _entity_flag(p, 'IsCombatAvatar'):
+        av = p
     if av is None:
         try:
             if not getattr(genv, 'is_in_hall', True):
@@ -1645,9 +1667,7 @@ def _local():
         except Exception:
             pass
     lid = _call_attr(av, ('id', 'entity_id')) if av is not None else None
-    team = _call_attr(av, ('combat_team_id', 'team_id', 'faction')) if av is not None else None
-    if team is None and p is not None:
-        team = _call_attr(p, ('combat_team_id', 'team_id', 'faction'))
+    team = _team_id(av) or _team_id(p)
     pos = _call_attr(av, ('position', 'pos')) if av is not None else None
     if pos is None and p is not None:
         pos = _call_attr(p, ('position', 'pos'))
@@ -1656,21 +1676,62 @@ def _local():
     return res
 
 
-def _is_combat(e):
+def _entity_flag(e, name):
     try:
-        if getattr(e, 'IsEvaMonster', False) or getattr(e, 'IsNewCrystalMonster', False) or getattr(e, 'IsDmzMonster', False):
-            return False
-        if getattr(e, 'IsRobotCombatAvatar', False) or getattr(e, 'IsRobotCombatAvatarZombie', False):
-            return True
-        if getattr(e, 'IsPlayerCombatAvatar', False):
-            return True
-        if getattr(e, 'IsCombatAvatar', False) or getattr(e, 'IsDummyCombatAvatar', False):
-            return True
-        if getattr(e, 'IsMonster', False):
-            return True
+        value = getattr(e, name, False)
+        return bool(value() if callable(value) else value)
     except Exception:
-        pass
-    return False
+        return False
+
+
+def _normalize_team_id(value):
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text if text not in ('', '0', '-1', 'None') else None
+
+
+def _team_id(e):
+    for name in ('combat_team_id', 'team_id'):
+        try:
+            team = _normalize_team_id(_call_attr(e, (name,)))
+            if team is not None:
+                return team
+        except Exception:
+            pass
+    return None
+
+
+def _is_vehicle(e):
+    if any(_entity_flag(e, name) for name in ('IsVehicle', 'IsAircraft', 'IsHelicopter')):
+        return True
+    # A player riding a vehicle remains a player; its vehicle_id is not a type marker.
+    avatar = any(_entity_flag(e, name) for name in ('IsPlayerCombatAvatar', 'IsRobotCombatAvatar', 'IsDummyCombatAvatar'))
+    return not avatar and any(word in type(e).__name__.lower() for word in ('vehicle', 'aircraft', 'helicopter'))
+
+
+def _is_skill_object(e):
+    # Check entity-type markers, never player skill/effect IDs or active buffs.
+    markers = ('IsMagicField', 'IsAttackDrone', 'IsHolographicRobot', 'IsSkillEntity',
+               'IsSkillObject', 'IsProjectile', 'IsBullet', 'IsTrap', 'IsTurret',
+               'IsSummon', 'IsDecoy', 'IsShaderPrecompileListRobot')
+    if any(_entity_flag(e, name) for name in markers):
+        return True
+    names = (cls.__name__.lower().replace('_', '') for cls in type(e).__mro__)
+    kinds = ('magicfield', 'skillentity', 'skillobject', 'projectile', 'attackdrone',
+             'holographicrobot', 'decoy', 'summoned', 'turret', 'trapentity')
+    return any(any(kind in name for kind in kinds) for name in names)
+
+
+def _is_combat(e):
+    if _is_skill_object(e) or _is_vehicle(e):
+        return False
+    if any(_entity_flag(e, name) for name in ('IsPlayerCombatAvatar',
+           'IsRobotCombatAvatar', 'IsRobotCombatAvatarZombie', 'IsDummyCombatAvatar', 'IsATMGuardAI')):
+        return True
+    # Remote avatars lack the local-player marker in SquadFight and other modes.
+    return _entity_flag(e, 'IsCombatAvatar') and any(
+        cls.__name__.startswith('CombatAvatar') for cls in type(e).__mro__)
 
 
 def _ai_kind(e, tn=None):
@@ -1679,17 +1740,28 @@ def _ai_kind(e, tn=None):
     except Exception:
         tn = ''
     try:
-        bot = bool(getattr(e, 'IsRobotCombatAvatar', False)) or bool(getattr(e, 'IsRobotCombatAvatarZombie', False))
+        bot = _entity_flag(e, 'IsRobotCombatAvatar') or _entity_flag(e, 'IsRobotCombatAvatarZombie')
     except Exception:
         bot = False
     try:
-        mon = bool(getattr(e, 'IsMonster', False))
+        mon = _entity_flag(e, 'IsMonster')
     except Exception:
         mon = False
     bot = bot or ('robot' in tn) or ('dummy' in tn)
     mon = mon or ('monster' in tn)
     ai = bot or mon or any(w in tn for w in ('offline', 'nowhere', 'guardai', 'npc'))
     return bot, mon, ai
+
+
+def _is_dying(e):
+    try:
+        st = getattr(e, 'combat_state', None)
+        if callable(st):
+            st = st()
+        from gshare.consts import CombatState
+        return st == getattr(CombatState, 'DYING', 2)
+    except Exception:
+        return False
 
 
 def _alive(e):
@@ -1703,7 +1775,9 @@ def _alive(e):
     if st is not None:
         try:
             from gshare.consts import CombatState
-            return st == CombatState.ALIVE
+            if hasattr(CombatState, 'DEAD') and hasattr(CombatState, 'GHOST'):
+                return st not in (CombatState.DEAD, CombatState.GHOST, getattr(CombatState, 'SPIRIT', 99))
+            return st in (CombatState.ALIVE, getattr(CombatState, 'DYING', 2))
         except Exception:
             pass
     try:
@@ -1747,7 +1821,41 @@ def _hp(e):
 
 
 def _max_hp(e):
-    for n in ('max_hp', 'hp_max', 'max_health', 'maxhp'):
+    for n in ('cur_maxhp', 'max_hp', 'hp_max', 'max_health', 'maxhp'):
+        try:
+            v = getattr(e, n, None)
+        except Exception:
+            continue
+        if v is None:
+            continue
+        try:
+            v = v() if callable(v) else v
+            if v is not None:
+                return float(v)
+        except Exception:
+            pass
+    return 100.0
+
+
+def _armor(e):
+    for n in ('armor', 'server_armor', 'client_armor', 'cur_armor'):
+        try:
+            v = getattr(e, n, None)
+        except Exception:
+            continue
+        if v is None:
+            continue
+        try:
+            v = v() if callable(v) else v
+            if v is not None:
+                return float(v)
+        except Exception:
+            pass
+    return 0.0
+
+
+def _max_armor(e):
+    for n in ('maxarmor', 'max_armor', 'server_max_armor'):
         try:
             v = getattr(e, n, None)
         except Exception:
@@ -1902,8 +2010,12 @@ def _line_of_sight_query(e, head, dist, max_dist):
     key = getattr(e, 'id', None)
     if key is None:
         return False
+    point = _vec(head)
+    if point is None or not all(math.isfinite(v) for v in point):
+        return False
+    cache_key = (key, tuple(round(v, 2) for v in point))
     now = time.time()
-    c = _vis_cache.get(key)
+    c = _vis_cache.get(cache_key)
     if c is not None and now - c[0] < 0.12:
         return c[1]
     if dist > max_dist:
@@ -1915,7 +2027,7 @@ def _line_of_sight_query(e, head, dist, max_dist):
         cam = _get_cam()
         origin = cam.GetOrigin() if cam is not None else None
         if origin is not None:
-            tgt = _v3(_sample_joint_transform(e, 0) or _sample_joint_transform(e, 2) or head)
+            tgt = _v3(point)
             if tgt is not None:
                 r = genv.space.RawRaycast(origin, max(1.0, dist + 2.0),
                                           cconst.PHYSICS_SHOOT_TEST, True, to_pos=tgt)
@@ -1927,8 +2039,8 @@ def _line_of_sight_query(e, head, dist, max_dist):
                     v = (owner == key)
     except Exception:
         v = False
-    _vis_cache[key] = (now, v)
-    if len(_vis_cache) > 512:
+    _vis_cache[cache_key] = _vis_cache[key] = (now, v)
+    if len(_vis_cache) > 2048:
         _vis_cache.clear()
     return v
 
@@ -1941,28 +2053,44 @@ def _query_occlusion_cache(e, max_age=0.60):
 
 
 def _check_faction_relation(e, local_av, local_team, team, is_bot, is_monster):
-    if is_bot or is_monster:
-        return True
+    local_team = _team_id(local_av) or _normalize_team_id(local_team) or _team_id(getattr(genv, 'player', None))
+    team = _team_id(e) or _normalize_team_id(team)
+    # Team identity wins even in modes where friendly fire allows CanDamage.
+    if local_team is not None and team is not None and local_team == team:
+        return False
     try:
-        gl = getattr(getattr(genv, 'space', None), 'game_logic', None)
-        fn = getattr(gl, 'CanDamage', None) if gl is not None else None
-        if local_av is not None and callable(fn):
-            try:
-                return bool(fn(local_av, e))
-            except Exception:
-                pass
+        space = getattr(e, 'space', None) or getattr(genv, 'space', None)
+        gl = getattr(space, 'game_logic', None)
+        source = local_av if local_av is not None else getattr(genv, 'player', None)
+        if source is not None:
+            teammate = getattr(gl, 'IsTeammate', None)
+            if callable(teammate):
+                try:
+                    if teammate(source, e):
+                        return False
+                except Exception:
+                    pass
+            damage = getattr(gl, 'CanDamage', None)
+            if callable(damage):
+                try:
+                    result = damage(source, e)
+                    if result is not None:
+                        return bool(result)
+                except Exception:
+                    pass
     except Exception:
         pass
-    if local_team is None or team is None:
-        return True
-    return team != local_team
+    if local_team is not None and team is not None:
+        return team != local_team
+    # Unknown player relationships stay hidden by default until team data arrives.
+    return bool(is_bot or is_monster)
 
 
 def _collect_space_entities(space):
     global _ent_list_cache
     now = time.time()
     c = _ent_list_cache
-    if c is not None and c[0] is space and now - c[1] < 0.75:
+    if c is not None and c[0] is space and now - c[1] < 0.03:
         return c[2]
     values = []
     seen = set()
@@ -1979,6 +2107,8 @@ def _collect_space_entities(space):
                 return 0
         n = 0
         for e in it:
+            if e is None:
+                continue
             k = id(e)
             if k in seen:
                 continue
@@ -1987,7 +2117,10 @@ def _collect_space_entities(space):
             n += 1
         return n
 
-    used = 0
+    # 1. Primary combat avatars direct lookup
+    add_src(getattr(space, 'combat_avatars', None))
+
+    # 2. Categorized entities (airborne/parachute/aircraft/vehicles/units)
     cats = getattr(space, 'entity_category', None)
     if cats:
         try:
@@ -1996,15 +2129,125 @@ def _collect_space_entities(space):
             keys = []
         for key in keys:
             low = str(key).lower()
-            if not any(w in low for w in ('avatar', 'robot', 'monster', 'combat', 'dummy',
-                                          'guard', 'npc', 'enemy', 'unit')):
-                continue
-            used += add_src(cats.get(key))
-    if not used:
-        for name in ('combat_avatars', 'dummy_entities', 'entities'):
-            add_src(getattr(space, name, None))
+            if any(w in low for w in ('avatar', 'robot', 'monster', 'combat', 'dummy',
+                                      'guard', 'npc', 'enemy', 'unit', 'aircraft',
+                                      'parachute', 'glider', 'skydive', 'vehicle', 'player')):
+                add_src(cats.get(key))
+
+    # 3. Space entities general pool
+    add_src(getattr(space, 'entities', None))
+    add_src(getattr(space, 'dummy_entities', None))
+
     _ent_list_cache = (space, now, values)
     return values
+
+
+def _sample_target_motion(e, position, now):
+    state = _sample_target_motion
+    space = getattr(genv, 'space', None)
+    if getattr(state, 'space', None) is not space:
+        state.space, state.samples = space, {}
+    samples = getattr(state, 'samples', None)
+    if samples is None:
+        samples = state.samples = {}
+    position = _vec(position)
+    if position is None or not all(math.isfinite(v) for v in position):
+        samples.pop(id(e), None)
+        return
+    previous = samples.get(id(e))
+    velocity = (0.0, 0.0, 0.0)
+    if previous is not None and previous[0] is e:
+        elapsed = now - previous[2]
+        if elapsed < 0.001:
+            return
+        if elapsed <= 0.25:
+            raw = tuple((position[i] - previous[1][i]) / elapsed for i in range(3))
+            # Discontinuous corrections/teleports must not become a lead vector.
+            if _len(raw) <= 100.0:
+                alpha = 1.0 - math.exp(-elapsed / 0.04)
+                velocity = raw if previous[3] is None else tuple(
+                    previous[3][i] + alpha * (raw[i] - previous[3][i]) for i in range(3))
+        else:
+            velocity = None
+    else:
+        velocity = None
+    if len(samples) >= 512 and id(e) not in samples:
+        samples.clear()
+    samples[id(e)] = (e, position, now, velocity)
+
+
+def _calc_ballistic_velocity():
+    try:
+        case = _current_case(_local()[0])
+        sources = [case]
+        for name in ('equip_proto', 'body_equip_proto', 'weapon_proto', 'proto'):
+            sources.append(getattr(case, name, None))
+        for source in sources:
+            for name in ('bullet_speed', 'projectile_speed', 'muzzle_velocity'):
+                try:
+                    value = source.get(name) if hasattr(source, 'get') else _call_attr(source, (name,))
+                    speed = float(value)
+                    if math.isfinite(speed) and speed > 0.0:
+                        return speed
+                except (TypeError, ValueError, AttributeError):
+                    pass
+    except Exception:
+        pass
+    return None
+
+
+def _calc_tracking_ratio(scale, dt, theta):
+    fraction = _human_frac(scale)
+    if theta < 0.08:
+        fraction *= max(0.30, theta / 0.08)
+    step = dt if dt > 0.0001 else 0.0166667
+    fraction = 1.0 - math.pow(max(0.001, 1.0 - fraction), step * 60.0)
+    return max(0.08, min(0.80, fraction))
+
+
+def _estimate_lead_position(e, point, origin, cfg, dt, cur_dir=None, tracking=True):
+    if not _flag(cfg, F_TRACK_LEAD):
+        return point
+    sample = getattr(_sample_target_motion, 'samples', {}).get(id(e))
+    now = time.monotonic()
+    if sample is None or sample[0] is not e or getattr(_sample_target_motion, 'space', None) is not getattr(genv, 'space', None):
+        return point
+    age = now - sample[2]
+    if age < 0.0 or age > 0.25 or sample[3] is None:
+        return point
+    velocity = sample[3]
+    if not all(math.isfinite(v) for v in velocity):
+        return point
+    step = max(0.001, min(0.1, float(dt)))
+    theta = math.pi
+    if cur_dir is not None:
+        direction = _norm(_sub(point, origin))
+        theta = math.acos(max(-1.0, min(1.0, _dot(_norm(cur_dir), direction))))
+    fraction = _calc_tracking_ratio(float(cfg[IDX_TRACK_SMOOTH]), step, theta) if tracking else 1.0
+    # Match the camera's smoothing lag; bound it so low FPS does not overlead.
+    lead = age + min(0.25, step * (1.0 - fraction) / fraction)
+    speed = _calc_ballistic_velocity()
+    if speed is not None:
+        relative = tuple(point[i] + velocity[i] * lead - origin[i] for i in range(3))
+        # Solve |relative + velocity*t| = projectile_speed*t for the first future intercept.
+        a = _dot(velocity, velocity) - speed * speed
+        b = 2.0 * _dot(relative, velocity)
+        c = _dot(relative, relative)
+        roots = []
+        if abs(a) < 1e-6:
+            if abs(b) > 1e-6:
+                roots.append(-c / b)
+        else:
+            discriminant = b*b - 4.0*a*c
+            if discriminant >= 0.0:
+                root = math.sqrt(discriminant)
+                roots.extend(((-b-root)/(2.0*a), (-b+root)/(2.0*a)))
+        future = [t for t in roots if math.isfinite(t) and t >= 0.0]
+        if future:
+            lead += min(1.0, min(future))
+    # shortcut: unknown projectile data gets tracking-lag compensation only, until weapon data is available.
+    lead = min(1.25, lead)
+    return tuple(point[i] + velocity[i] * lead for i in range(3))
 
 
 def _query_visible_entities(max_dist, want_gun=True, want_bone=True):
@@ -2024,7 +2267,7 @@ def _query_visible_entities(max_dist, want_gun=True, want_bone=True):
             return False
         if cam_fwd is None:
             return True
-        return _dot(_sub(vp, origin), cam_fwd) > 0.05
+        return _dot(_sub(vp, origin), cam_fwd) > -0.10
 
     space = getattr(genv, 'space', None)
     if space is None:
@@ -2043,38 +2286,45 @@ def _query_visible_entities(max_dist, want_gun=True, want_bone=True):
                 continue
             tn = type(e).__name__.lower()
             is_bot, is_monster, is_ai = _ai_kind(e, tn)
-            if not (is_ai or _is_combat(e) or hasattr(e, 'combat_team_id') or hasattr(e, 'hp')):
+            if not _is_combat(e):
                 continue
             if not _alive(e):
                 continue
-            feet = _vec(_call_attr(e, ('position', 'pos')))
+            is_dying = _is_dying(e)
+            pos_raw = _call_attr(e, ('position', 'pos', 'GetPosition'))
+            if pos_raw is None:
+                m = getattr(e, 'model', None)
+                if m is not None:
+                    pos_raw = _call_attr(m, ('Position', 'position', 'GetPosition'))
+            feet = _vec(pos_raw)
             if feet is not None:
+                _sample_target_motion(e, feet, time.monotonic())
                 rough = _len(_sub(feet, origin))
-                if rough > max_dist + 2.0:
+                if rough > max_dist + 10.0:
                     continue
             tb = time.time()
             head = _sample_joint_transform(e, 0) if want_bone else None
             t_bone += time.time() - tb
+            offset_y = 0.45 if is_dying else 1.62
             if head is None and feet is not None:
-                head = _v3((feet[0], feet[1] + 1.62, feet[2]))
+                head = _v3((feet[0], feet[1] + offset_y, feet[2]))
             ht = _vec(head)
             if ht is None:
                 continue
             if feet is None:
-                feet = (ht[0], ht[1] - 1.62, ht[2])
+                feet = (ht[0], ht[1] - offset_y, ht[2])
             dist = _len(_sub(ht, origin))
             if dist <= 0.1 or dist > max_dist:
                 continue
             ph = _matrix_world_to_screen(head) if _front(head) else None
             pf = _matrix_world_to_screen(feet) if _front(feet) else None
-            if ph is None and pf is None:
-                continue
+            # Keep behind-camera targets for offscreen arrows; tracking checks its own FOV.
             if ph is None:
                 ph = (-1.0, -1.0)
             if pf is None:
                 pf = (-1.0, -1.0)
             bones_2d = []
-            if want_bone:
+            if want_bone and not is_dying:
                 tb = time.time()
                 for bi in range(16):
                     bp = _sample_joint_transform(e, bi)
@@ -2086,13 +2336,13 @@ def _query_visible_entities(max_dist, want_gun=True, want_bone=True):
                 t_bone += time.time() - tb
             else:
                 bones_2d = [-1.0] * 32
-            team = _call_attr(e, ('combat_team_id', 'team_id', 'faction'))
-            is_team = False if is_ai else (not _check_faction_relation(e, local_av, local_team, team, is_bot, is_monster))
+            team = _team_id(e)
+            is_team = not _check_faction_relation(e, local_av, local_team, team, is_bot, is_monster)
             tb = time.time()
             gun = _gun_name(e) if want_gun else ''
             t_bone += time.time() - tb
             out.append((dist, e, eid, ht, feet, ph, pf, bones_2d, (-1.0, -1.0),
-                        gun, team, is_team))
+                        gun, team, is_team, is_dying))
         except Exception:
             pass
     out.sort(key=lambda x: x[0])
@@ -2268,76 +2518,84 @@ def _placer_dir(placer):
     return None
 
 
-def _pick(items, origin, cam_dir, fov, max_dist, cfg, bone, check_team, check_visible, force_head=False):
+def _target_joint_indices(cfg, legacy_bone=0, force_head=False):
+    if force_head:
+        return (0,)
+    options = _options(cfg)
+    if options & OPT_TRACK_JOINTS_SET:
+        bones = tuple(index for index, flag in ((0, OPT_TRACK_HEAD), (1, OPT_TRACK_NECK), (2, OPT_TRACK_BODY))
+                      if options & flag)
+        return bones or (0,)
+    if _flag(cfg, F_TRACK_MULTIPOINT) or legacy_bone == 4:
+        return (0, 1, 2)
+    return (legacy_bone,) if legacy_bone in (0, 1, 2, 3) else (0,)
+
+
+def _pick(items, origin, cam_dir, fov, max_dist, cfg, bone, check_team, check_visible,
+          force_head=False, preferred_eid=None):
     try:
-        best_dot = math.cos(math.radians(max(1.0, float(fov)) * 0.5))
-    except Exception:
-        best_dot = math.cos(math.radians(6.0))
-    team_ok = _flag(cfg, F_AIM_TEAM)
-    vis_only = _flag(cfg, F_AIM_VISIBLE)
-    best = None
+        fov = float(fov)
+        max_dist = float(max_dist)
+        if not math.isfinite(fov) or not math.isfinite(max_dist) or max_dist <= 0.0:
+            return None
+        half_fov = math.radians(max(1.0, min(180.0, fov)) * 0.5)
+    except (TypeError, ValueError):
+        return None
+    best_dot = math.cos(half_fov)
+    team_ok = _flag(cfg, F_TRACK_FACTION)
+    vis_only = _flag(cfg, F_TRACK_OCCLUSION)
+    best, best_rank = None, None
+    bones = _target_joint_indices(cfg, bone, force_head)
     for item in items:
-        dist, e, eid, ht, ft, ph, pf, ps, pn, gun, team, is_team = item
-        if not _alive(e):
+        dist, e, eid, ht = item[0], item[1], item[2], item[3]
+        is_team = item[11] if len(item) > 11 else False
+        is_dying = (item[12] if len(item) > 12 else False) or _is_dying(e)
+        if is_dying and (_options(cfg) & OPT_TRACK_IGNORE_DOWNED):
             continue
-        if check_team and is_team and not team_ok:
+        if not _alive(e) or (check_team and is_team and not team_ok):
             continue
-        if dist > max_dist:
+        if not math.isfinite(dist) or dist > max_dist:
             continue
-        if check_visible and vis_only and not _line_of_sight_query(e, ht, dist, max_dist):
+        point = None
+        for bone_index in bones:
+            tgt = _sample_joint_transform(e, bone_index)
+            # Single legacy head targeting can use the collected head estimate.
+            if tgt is None and bones == (0,):
+                tgt = ht
+            tt = _vec(tgt)
+            if tt is None or not all(math.isfinite(v) for v in tt):
+                continue
+            td = _sub(tt, origin)
+            distance = _len(td)
+            if distance < 0.1 or distance > max_dist:
+                continue
+            dot = max(-1.0, min(1.0, _dot(_norm(cam_dir), _norm(td))))
+            if dot < best_dot:
+                continue
+            if check_visible and vis_only and not _line_of_sight_query(e, tt, distance, max_dist):
+                continue
+            point = (tt, td, distance, dot)
+            break
+        if point is None:
             continue
-        hd = _sub(ht, origin)
-        if _len(hd) > max_dist:
-            continue
-        if _dot(cam_dir, _norm(hd)) < best_dot - 0.03:
-            continue
-        if force_head or bone == 0:
-            tgt = ht
-        else:
-            tgt = _sample_joint_transform(e, bone) or ht
-        tt = _vec(tgt)
-        if tt is None:
-            continue
-        td = _sub(tt, origin)
-        dl = _len(td)
-        if dl < 0.1 or dl > max_dist:
-            continue
-        dot = _dot(cam_dir, _norm(td))
-        if dot < best_dot:
-            continue
-        best_dot = dot
-        best = (e, tt, td, dist, dot)
+        tt, td, distance, dot = point
+        # Center alignment dominates; range breaks close choices without pulling to distant targets.
+        score = 0.85 * math.acos(dot) / half_fov + 0.15 * distance / max_dist
+        if preferred_eid is not None and str(eid) == str(preferred_eid):
+            score -= 0.06
+        # Switch out of allies/knocked targets before applying retention preference.
+        rank = (bool(is_team) if check_team else False, bool(is_dying), score, distance, str(eid))
+        if best_rank is None or rank < best_rank:
+            best_rank = rank
+            best = (e, tt, td, dist, dot)
     return best
 
 
 def _pick_eid(items, origin, cam_dir, eid, max_dist, cfg, bone, check_team):
-    team_ok = _flag(cfg, F_AIM_TEAM)
-    for item in items:
-        dist, e, eid2, ht = item[0], item[1], item[2], item[3]
-        try:
-            if int(eid2) != int(eid):
-                continue
-        except Exception:
-            continue
-        if not _alive(e):
-            continue
-        if check_team and item[11] and not team_ok:
-            continue
-        if dist > max_dist:
-            continue
-        hd = _sub(ht, origin)
-        if _len(hd) > max_dist:
-            continue
-        tgt = ht if bone == 0 else (_sample_joint_transform(e, bone) or ht)
-        tt = _vec(tgt)
-        if tt is None:
-            continue
-        td = _sub(tt, origin)
-        dl = _len(td)
-        if dl < 0.1 or dl > max_dist:
-            continue
-        return (e, tt, td, dist, _dot(cam_dir, _norm(td)))
-    return None
+    # Retention must honor the same FOV, visibility, team and knock filters as acquisition.
+    candidates = [item for item in items if str(item[2]) == str(eid)]
+    return _pick(candidates, origin, cam_dir, float(cfg[IDX_TRACK_FOV]), max_dist, cfg,
+                 bone, check_team, True, False, eid)
 
 
 def _lerp(a, b, t):
@@ -2421,46 +2679,93 @@ def _slerp_dir(a, b, t):
 
 def _begin_path(start_dir, target_dir, duration, curve, kind, target_e=None, fire=False):
     global _path
-    s = _norm(start_dir)
-    t = _norm(target_dir)
-    if _dot(s, t) < 0.0:
+    start, end = _norm(start_dir), _norm(target_dir)
+    dot = max(-1.0, min(1.0, _dot(start, end)))
+    if dot < 0.0:
+        _path = None
         return False
-    axis = _norm(_cross(s, t))
-    if _len(axis) < 1e-6:
-        axis = (0.0, 1.0, 0.0)
-    _path = {
-        'start': s, 'end': t, 'axis': axis,
-        't': 0.0, 'dur': max(0.03, float(duration)),
-        'curve': float(curve), 'kind': kind, 'target': target_e,
-        'fire': bool(fire), 'fired': False,
-        'phase': time.time() * 1.7,
-    }
+    axis = _norm(_cross(start, end))
+    angle = math.acos(dot)
+    count = max(3, min(8, int(math.degrees(angle) / 3.0) + 3))
+    bend = min(abs(float(curve)), angle * 0.08)
+    nodes = []
+    for index in range(count):
+        u = index / float(count - 1)
+        direction = _slerp_dir(start, end, u)
+        offset = bend * math.sin(math.pi * u)
+        nodes.append(_norm(tuple(direction[i] + axis[i] * offset for i in range(3))))
+    nodes[0], nodes[-1] = start, end
+    _path = {'start': start, 'end': end, 'nodes': nodes, 't': 0.0,
+             'dur': max(0.03, float(duration)), 'kind': kind, 'target': target_e,
+             'space': getattr(genv, 'space', None), 'last': time.monotonic(),
+             'fire': bool(fire), 'fired': False}
     return True
 
 
-def _path_sample(p, u):
-    d = _slerp_dir(p['start'], p['end'], u)
-    c = p['curve']
-    if abs(c) > 1e-6:
-        perp = _cross(p['axis'], d)
-        w = math.sin(math.pi * max(0.0, min(1.0, u)))
-        d = _norm((d[0] + perp[0] * c * w,
-                   d[1] + perp[1] * c * w,
-                   d[2] + perp[2] * c * w))
-    return d
+def _path_sample(path, u):
+    nodes = path['nodes']
+    u = max(0.0, min(1.0, u))
+    if u >= 1.0:
+        return nodes[-1]
+    segment = u * (len(nodes) - 1)
+    index = min(len(nodes) - 2, int(segment))
+    t = segment - index
+    p0, p1 = nodes[max(0, index-1)], nodes[index]
+    p2, p3 = nodes[index+1], nodes[min(len(nodes)-1, index+2)]
+    # Catmull-Rom joins node tangents without stopping at every intermediate point.
+    return _norm(tuple(0.5 * (2*p1[i] + (-p0[i]+p2[i])*t +
+        (2*p0[i]-5*p1[i]+4*p2[i]-p3[i])*t*t +
+        (-p0[i]+3*p1[i]-3*p2[i]+p3[i])*t*t*t) for i in range(3)))
 
 
 def _path_advance(dt):
     global _path
-    p = _path
-    if p is None:
+    path = _path
+    if path is None:
         return None, True, None
-    p['t'] += max(0.0001, dt)
-    u = p['t'] / p['dur']
+    path['t'] = min(path['dur'], path['t'] + max(0.0, float(dt)))
+    u = path['t'] / path['dur']
     if u >= 1.0:
         _path = None
-        return p['end'], True, p
-    return _path_sample(p, _bezier_ease(u)), False, p
+        return path['end'], True, path
+    return _path_sample(path, u*u*(3.0-2.0*u)), False, path
+
+
+def _filter_view_direction(entity, current, target, cfg, dt):
+    global _path
+    target = _norm(target)
+    if not _flag(cfg, F_TRACK_HUMANIZE):
+        _path = None
+        return target
+    now = time.monotonic()
+    smooth = float(cfg[IDX_HUMAN_SMOOTH])
+    if not math.isfinite(smooth) or not 0.01 <= smooth <= 1.0:
+        smooth = 0.5
+    path = _path
+    reset = (path is None or path['target'] is not entity or
+             path['space'] is not getattr(genv, 'space', None) or
+             now-path['last'] > 0.25 or dt > 0.15)
+    if not reset:
+        # Large direction changes need a fresh path from the camera's current heading.
+        reset = _dot(path['end'], target) < math.cos(math.radians(12.0))
+    if reset:
+        duration = 0.04 + 0.20*smooth
+        if not _begin_path(current, target, duration, 0.008*smooth, 'human', entity):
+            return target
+        path = _path
+    else:
+        delta = _sub(target, path['end'])
+        count = len(path['nodes'])
+        path['nodes'] = [_norm(tuple(node[j] + delta[j]*i/(count-1) for j in range(3)))
+                         for i, node in enumerate(path['nodes'])]
+        path['nodes'][-1] = target
+        path['end'] = target
+    path['last'] = now
+    direction, done, completed = _path_advance(max(0.0, min(0.05, dt)))
+    if done:
+        # Completed paths track the live endpoint; do not restart on every moving frame.
+        _path = completed
+    return direction
 
 
 def _apply_placer_delta(cam_dir, node_dir, dt=0.0166667, jitter_scale=0.6):
@@ -2502,11 +2807,11 @@ def _wrap_pi(a):
 
 
 def _calibrate_turn(placer):
-    global _aim_sign_y, _aim_sign_p, _aim_sign_ready
+    global _track_sign_y, _track_sign_p, _track_sign_ready
     try:
         from MType import Vector3
     except Exception:
-        _aim_sign_ready = True
+        _track_sign_ready = True
         return
     try:
         d0 = _vec(_placer_dir(placer))
@@ -2518,7 +2823,7 @@ def _calibrate_turn(placer):
                 v1 = Vector3(d1[0], d1[1], d1[2])
                 dyaw = _wrap_pi(v1.yaw - v0.yaw)
                 if abs(dyaw) > 1e-5:
-                    _aim_sign_y = 1.0 if dyaw > 0.0 else -1.0
+                    _track_sign_y = 1.0 if dyaw > 0.0 else -1.0
             placer.TurnView(-0.01, 0.0)
             d2 = _vec(_placer_dir(placer)) or d1 or d0
             v2 = Vector3(d2[0], d2[1], d2[2])
@@ -2528,15 +2833,15 @@ def _calibrate_turn(placer):
                 v3 = Vector3(d3[0], d3[1], d3[2])
                 dpitch = _wrap_pi(v3.pitch - v2.pitch)
                 if abs(dpitch) > 1e-5:
-                    _aim_sign_p = 1.0 if dpitch > 0.0 else -1.0
+                    _track_sign_p = 1.0 if dpitch > 0.0 else -1.0
             placer.TurnView(0.0, -0.01)
     except Exception:
         _sys_log(traceback.format_exc())
-    _aim_sign_ready = True
+    _track_sign_ready = True
 
 
 def _apply_view_transform(placer, cur_dir, target_dir, scale, dt=0.0166667):
-    global _aim_fallback_n
+    global _track_fallback_n
     try:
         from MType import Vector3
         tgt = _vec(target_dir)
@@ -2555,27 +2860,19 @@ def _apply_view_transform(placer, cur_dir, target_dir, scale, dt=0.0166667):
         theta = math.acos(cos_t)
         if theta < 0.0015:
             return False
-        frac = _human_frac(scale)
-        if theta < 0.08:
-            frac *= max(0.30, theta / 0.08)
-        step = dt if dt > 0.0001 else 0.0166667
-        frac = 1.0 - math.pow(max(0.001, 1.0 - frac), step * 60.0)
-        frac = max(0.08, min(0.80, frac))
-        jscale = max(0.0, min(1.0, (theta - 0.02) / 0.12))
-        jy, jp = _micro_jitter(dt)
-        jy *= jscale
-        jp *= jscale
+        frac = _calc_tracking_ratio(scale, dt, theta)
+        jy, jp = 0.0, 0.0
         if placer is None or not hasattr(placer, 'TurnView'):
             return False
-        if not _aim_sign_ready:
+        if not _track_sign_ready:
             _calibrate_turn(placer)
             base = _vec(_placer_dir(placer)) or base
         cy = Vector3(base[0], base[1], base[2])
         ty = Vector3(tgt[0], tgt[1], tgt[2])
         dy = _wrap_pi(ty.yaw - cy.yaw)
         dp = _wrap_pi(ty.pitch - cy.pitch)
-        turn_y = _aim_sign_y * dy * frac + jy
-        turn_p = _aim_sign_p * dp * frac + jp
+        turn_y = _track_sign_y * dy * frac + jy
+        turn_p = _track_sign_p * dp * frac + jp
         before = base
         try:
             placer.TurnView(turn_y, turn_p)
@@ -2584,7 +2881,7 @@ def _apply_view_transform(placer, cur_dir, target_dir, scale, dt=0.0166667):
         after = _vec(_placer_dir(placer)) or base
         moved = math.degrees(math.acos(max(-1.0, min(1.0, _dot(before, after)))))
         if moved < 0.0008:
-            _aim_fallback_n += 1
+            _track_fallback_n += 1
             rot = getattr(placer, 'Rotate', None)
             if callable(rot):
                 try:
@@ -2612,70 +2909,164 @@ def _apply_view_transform(placer, cur_dir, target_dir, scale, dt=0.0166667):
         return False
 
 
-def _damp_camera_impulse(cfg, cam, dt, aiming):
-    global _recoil_t, _recoil_grace
-    if aiming or _flag(cfg, F_AIM):
-        try:
-            aiming = aiming or _aim_latched or _poll_input_keystate(int(cfg[IDX_AIM_KEY]))
-        except Exception:
-            pass
-    if not _flag(cfg, F_RECOIL) or aiming or cam is None:
-        _recoil_t = 0.0
-        _recoil_grace = 0.0
-        return
-    firing = _poll_input_keystate(0x01)
-    if firing:
-        _recoil_grace = 0.10
-    elif _recoil_grace > 0.0:
-        _recoil_grace = max(0.0, _recoil_grace - dt)
-        firing = True
-    else:
-        _recoil_t = 0.0
-        return
-    strength = max(0.0, min(2.0, float(cfg[IDX_HUMANIZE])))
-    if strength <= 0.0:
-        return
-    placer = _get_placer()
-    if placer is None or not hasattr(placer, 'TurnView'):
-        return
-    step = dt if dt > 0.0001 else 0.0166667
-    tick = step / 0.0166667
-    _recoil_t += step
-    pull = 0.0019 * strength * tick
-    sway = math.sin(_recoil_t * 7.3) * 0.00055 * strength * tick
+def _damp_impulse_call(placer, original, args, kwargs):
+    saved = []
     try:
-        placer.TurnView(sway, -pull)
+        # Magnitudes consumed by FpsPlacer impulse FSM.
+        for name in ('RecoilYawRange', 'RecoilPitchRange', 'RecoilDownYawRange',
+                     'RecoilDownPitchRange', 'RecoilDownCyclePct', 'forcePersistRecoilRecover'):
+            if hasattr(placer, name):
+                value = getattr(placer, name)
+                setattr(placer, name, False if name == 'forcePersistRecoilRecover' else 0.0)
+                saved.append((name, value))
+        return original(*args, **kwargs)
+    finally:
+        for name, value in reversed(saved):
+            setattr(placer, name, value)
+
+
+def _restore_impulse_state():
+    global _impulse_hooks
+    state, _impulse_hooks = _impulse_hooks, None
+    if state is None:
+        return
+    placer, hooks = state
+    for name, wrapper, had_local, previous in reversed(hooks):
+        if getattr(placer, name, None) is wrapper:
+            if had_local:
+                setattr(placer, name, previous)
+            else:
+                delattr(placer, name)
+
+
+def _sync_impulse_damping(cfg, in_match):
+    global _impulse_hooks
+    placer = _get_placer() if in_match and _flag(cfg, F_DAMP_IMPULSE) else None
+    if _impulse_hooks is not None:
+        if placer is _impulse_hooks[0]:
+            return
+        _restore_impulse_state()
+    if placer is None:
+        return
+    methods = ('RecoilUp', 'RecoilFall', 'RecoilDown')
+    if not all(callable(getattr(placer, name, None)) for name in methods):
+        return
+    hooks = []
+    _impulse_hooks = (placer, hooks)
+    try:
+        for name in methods:
+            current = getattr(placer, name)
+            original = getattr(current, '_m_damp_orig', current)
+            local = getattr(placer, '__dict__', {})
+            restore = getattr(current, '_m_damp_rest', (name in local, local.get(name)))
+            def wrapper(*args, _original=original, **kwargs):
+                return _damp_impulse_call(placer, _original, args, kwargs)
+            wrapper._m_damp_orig = original
+            wrapper._m_damp_rest = restore
+            setattr(placer, name, wrapper)
+            hooks.append((name, wrapper, restore[0], restore[1]))
     except Exception:
-        pass
+        _restore_impulse_state()
+        _sys_log('[sys:impulse] filter unavailable: ' + traceback.format_exc())
+
+
+def _query_corrected_ray(worker, native):
+    cfg = _read_cfg()
+    if (not _flag(cfg, F_TRACK_VIEW) or not (_options(cfg) & OPT_RAY_REDIRECT) or
+            _flag(cfg, F_MENU_OPEN) or bool(getattr(genv, 'is_in_hall', True)) or
+            getattr(worker, 'caster', None) is not getattr(genv, 'player', None)):
+        return native
+    cached = _ray_target
+    if cached is None or not _track_busy:
+        return native
+    entity, point, stamp, space = cached
+    age = time.time() - stamp
+    if space is not getattr(genv, 'space', None) or age < 0 or age > 0.10 or not _alive(entity):
+        return native
+    cam = _get_cam()
+    origin = _vec(cam.GetOrigin()) if cam is not None else None
+    if origin is None:
+        return native
+    delta = _sub(point, origin)
+    distance = _len(delta)
+    if not math.isfinite(distance) or distance < 0.1 or distance > float(cfg[IDX_TRACK_MAX_DIST]):
+        return native
+    direction = _norm(delta)
+    forward = _cam_dir(cam)
+    if forward is None or _dot(_norm(forward), direction) < math.cos(math.radians(float(cfg[IDX_TRACK_FOV]) * .5)):
+        return native
+    from MType import Vector3
+    return Vector3(*direction)
+
+
+def _sync_ray_interceptor(cfg, in_match):
+    global _ray_hook, _ray_target
+    enabled = in_match and _flag(cfg, F_TRACK_VIEW) and bool(_options(cfg) & OPT_RAY_REDIRECT)
+    if not enabled:
+        _ray_target = None
+        if _ray_hook is not None:
+            cls, wrapper, original = _ray_hook
+            if getattr(cls, 'GetShootDir', None) is wrapper:
+                cls.GetShootDir = original
+            _ray_hook = None
+        return
+    module = sys.modules.get('gclient.gameplay.logic_base.spell.spell_core.gun_spell')
+    cls = getattr(module, 'SpellWorker', None)
+    current = getattr(cls, 'GetShootDir', None)
+    if _ray_hook is not None and current is _ray_hook[1]:
+        return
+    if _ray_hook is not None:
+        old_cls, old_wrapper, old_original = _ray_hook
+        if getattr(old_cls, 'GetShootDir', None) is old_wrapper:
+            old_cls.GetShootDir = old_original
+        _ray_hook = None
+    original = getattr(current, '_m_ray_orig', current)
+    code = getattr(original, '__code__', None)
+    if (code is None or code.co_argcount != 2 or code.co_varnames[:2] != ('self', 'shoot_pos') or
+            'GetRayDirectionFromScreenPoint' not in code.co_names):
+        return
+    def wrapper(worker, shoot_pos):
+        # Keep native scatter/heat bookkeeping before selecting this shot's direction.
+        native = original(worker, shoot_pos)
+        try:
+            return _query_corrected_ray(worker, native)
+        except Exception:
+            return native
+    wrapper._m_ray_orig = original
+    cls.GetShootDir = wrapper
+    _ray_hook = (cls, wrapper, original)
 
 
 def _update_cam_trajectory(cfg, items, cam, origin, menu_open, dt=0.0166667):
-    global _aim_prev, _aim_latched, _aim_busy, _path
-    global _aim_hold_until, _aim_diag_t, _aim_fallback_n
-    global _aim_eid, _aim_eid_t
+    global _track_prev, _track_latched, _track_busy, _path
+    global _track_hold_until, _track_diag_t, _track_fallback_n
+    global _track_eid, _track_eid_t
+    global _ray_target
+    _ray_target = None
+    redirect = bool(_options(cfg) & OPT_RAY_REDIRECT)
     now = time.time()
-    aim_key = int(cfg[IDX_AIM_KEY])
-    aim_enabled = _flag(cfg, F_AIM)
-    aim_down = aim_enabled and _poll_input_keystate(aim_key)
-    if aim_down:
-        _aim_hold_until = now + 0.30
-    held = aim_down or now < _aim_hold_until
-    if _get_track_mode_toggle(cfg) and aim_enabled:
-        if aim_down and not _aim_prev:
-            _aim_latched = not _aim_latched
-        aim_on = _aim_latched
+    track_key = int(cfg[IDX_TRACK_KEY])
+    track_enabled = _flag(cfg, F_TRACK_VIEW)
+    track_down = track_enabled and _poll_input_keystate(track_key)
+    if track_down:
+        _track_hold_until = now + 0.30
+    held = track_down or now < _track_hold_until
+    if _get_track_mode_toggle(cfg) and track_enabled:
+        if track_down and not _track_prev:
+            _track_latched = not _track_latched
+        track_on = _track_latched
     else:
-        _aim_latched = False
-        aim_on = held
-    if aim_down != _aim_prev:
-        _sys_log('aim key %d %s held=%d %s' % (
-            aim_key, 'down' if aim_down else 'up', 1 if held else 0, _key_diag(aim_key)))
-    _aim_prev = aim_down
+        _track_latched = False
+        track_on = held
+    if track_down != _track_prev:
+        _sys_log('[sys:track] key %d %s held=%d %s' % (
+            track_key, 'down' if track_down else 'up', 1 if held else 0, _key_diag(track_key)))
+    _track_prev = track_down
     if menu_open:
-        aim_on = False
-        _aim_latched = False
+        track_on = False
+        _track_latched = False
         _path = None
-    _aim_busy = aim_on
+    _track_busy = track_on
     if cam is None or origin is None:
         _path = None
         return
@@ -2685,43 +3076,55 @@ def _update_cam_trajectory(cfg, items, cam, origin, menu_open, dt=0.0166667):
         _path = None
         return
 
-    if not items:
+    if not track_on or not items:
+        _track_eid, _track_eid_t = None, 0.0
+        _path = None
         return
 
-    if aim_on:
-        if placer is None or not hasattr(placer, 'TurnView'):
-            if now - _aim_diag_t >= 1.0:
-                _aim_diag_t = now
+    if track_on:
+        if not redirect and (placer is None or not hasattr(placer, 'TurnView')):
+            if now - _track_diag_t >= 1.0:
+                _track_diag_t = now
                 _sys_log('[cam:track] no TurnView placer=%s turn=%s' %
                      (type(placer).__name__, hasattr(placer, 'TurnView')))
             return
-        bone = int(cfg[IDX_AIM_BONE])
-        max_dist = float(cfg[IDX_AIM_MAX_DIST])
-        best = _pick(items, origin, cur, float(cfg[IDX_AIM_FOV]), max_dist, cfg, bone, True, True)
-        if best is None and _aim_eid is not None and now - _aim_eid_t < 0.60:
-            best = _pick_eid(items, origin, cur, _aim_eid, max_dist, cfg, bone, True)
+        bone = int(cfg[IDX_TRACK_JOINT])
+        max_dist = float(cfg[IDX_TRACK_MAX_DIST])
+        preferred = _track_eid if now - _track_eid_t < 0.60 else None
+        best = _pick(items, origin, cur, float(cfg[IDX_TRACK_FOV]), max_dist, cfg, bone, True, True, False, preferred)
+        if best is None and _track_eid is not None and now - _track_eid_t < 0.60:
+            best = _pick_eid(items, origin, cur, _track_eid, max_dist, cfg, bone, True)
         if best is None:
-            if now - _aim_diag_t >= 1.0:
-                _aim_diag_t = now
+            _path = None
+            _track_eid, _track_eid_t = None, 0.0
+            if now - _track_diag_t >= 1.0:
+                _track_diag_t = now
                 _sys_log('[cam:track] no target in fov items=%d fov=%.1f placer=%s %s' % (
-                    len(items), float(cfg[IDX_AIM_FOV]), type(placer).__name__,
-                    _key_diag(aim_key)))
+                    len(items), float(cfg[IDX_TRACK_FOV]), type(placer).__name__,
+                    _key_diag(track_key)))
             return
         e, tt, td, dist, dot = best
+        tt = _estimate_lead_position(e, tt, origin, cfg, dt, cur, tracking=not redirect)
+        td = _sub(tt, origin)
         try:
-            _aim_eid = int(getattr(e, 'id', 0) or 0) or None
-            _aim_eid_t = now
+            _track_eid = int(getattr(e, 'id', 0) or 0) or None
+            _track_eid_t = now
         except Exception:
-            _aim_eid = None
-        _aim_busy = True
-        if now - _aim_diag_t >= 1.0:
-            _aim_diag_t = now
+            _track_eid = None
+        _track_busy = True
+        if now - _track_diag_t >= 1.0:
+            _track_diag_t = now
             c = _vec(cur) or (0.0, 0.0, 1.0)
             t = _norm(_vec(td) or (0.0, 0.0, 1.0))
             theta = math.degrees(math.acos(max(-1.0, min(1.0, _dot(_norm(c), t)))))
             _sys_log('[cam:track] target dist=%.1f theta=%.2f fallback=%d items=%d %s' % (
-                dist, theta, _aim_fallback_n, len(items), _key_diag(aim_key)))
-        _apply_view_transform(placer, cur, td, float(cfg[IDX_AIM_SMOOTH]), dt)
+                dist, theta, _track_fallback_n, len(items), _key_diag(track_key)))
+        if redirect:
+            _path = None
+            _ray_target = (e, tt, now, getattr(genv, 'space', None))
+            return
+        direction = _filter_view_direction(e, cur, td, cfg, dt)
+        _apply_view_transform(placer, cur, direction, float(cfg[IDX_TRACK_SMOOTH]), dt)
 
 
 def _current_case(entity):
@@ -3391,7 +3794,7 @@ def _serialize_frame_data(cfg, cam, in_match, origin, lpos, items):
     pitch = 0.0
     fov = 0.0
     if cam is not None:
-        fwd = _vec(getattr(getattr(cam, 'Transform', None), 'z_axis', None)) or fwd
+        fwd = _vec(_cam_dir(cam)) or _vec(getattr(getattr(cam, 'Transform', None), 'z_axis', None)) or fwd
         try:
             cam2 = getattr(genv, 'camera', None)
             placer = getattr(cam2, 'placer', None)
@@ -3432,14 +3835,15 @@ def _serialize_frame_data(cfg, cam, in_match, origin, lpos, items):
     off = STATE_HEAD_SIZE
     n = 0
     if in_match and items:
-        do_vis = _flag(cfg, F_ESP_VISIBLE) or _flag(cfg, F_AIM_VISIBLE)
+        do_vis = _flag(cfg, F_RENDER_OCCLUSION) or _flag(cfg, F_TRACK_OCCLUSION)
         vis_budget = 64
-        max_dist = float(cfg[IDX_ESP_MAX_DIST])
+        max_dist = float(cfg[IDX_RENDER_MAX_DIST])
         for item in items:
-            dist, e, eid, ht, feet, ph, pf, ps, pn, gun, eteam, is_team = item
+            dist, e, eid, ht, feet, ph, pf, ps, pn, gun, eteam, is_team = item[:12]
+            is_dying = item[12] if len(item) > 12 else _is_dying(e)
             if dist > max_dist:
                 continue
-            if is_team and not _flag(cfg, F_ESP_TEAM):
+            if is_team and not _flag(cfg, F_RENDER_FACTION):
                 continue
             vis = 1
             if do_vis:
@@ -3464,9 +3868,9 @@ def _serialize_frame_data(cfg, cam, in_match, origin, lpos, items):
                                  eid_i, _bytes(_ename(e), 40), _bytes(gun, 32),
                                  ht[0], ht[1], ht[2], feet[0], feet[1], feet[2],
                                  ph[0], ph[1], pf[0], pf[1],
-                                 float(dist), _hp(e), _max_hp(e), team_i,
+                                 float(dist), _hp(e), _max_hp(e), _armor(e), _max_armor(e), team_i,
                                  vis, 1 if is_team else 0, 1 if getattr(e, 'IsMonster', False) else 0, 1,
-                                 0,
+                                 1 if is_dying else 0,
                                  *bones_data)
             except Exception:
                 continue
@@ -3479,7 +3883,7 @@ def _serialize_frame_data(cfg, cam, in_match, origin, lpos, items):
 
 
 def _on_story_tick(dt):
-    global _last_state, _fire_release_at, _last_catalog_check, _aim_busy
+    global _last_state, _fire_release_at, _last_catalog_check, _track_busy
     global _last_gather, _gather_cache, _last_hooks, _last_scrub, _diag_t
     global _perf_t, _perf_last
     if int(getattr(builtins, '_m_generation', 0) or 0) != _my_gen:
@@ -3508,6 +3912,7 @@ def _on_story_tick(dt):
             _fire_release_at = 0.0
         menu_open = _flag(cfg, F_MENU_OPEN)
         in_match = not bool(getattr(genv, 'is_in_hall', True))
+        _sync_ray_interceptor(cfg, in_match)
         _apply(cfg)
         _drive_saved_skins(cfg)
         _run_skin_tasks()
@@ -3518,20 +3923,20 @@ def _on_story_tick(dt):
         cam = None
         origin = None
         items = []
-        aim_active = _flag(cfg, F_AIM)
-        esp_on = _flag(cfg, F_ESP)
-        if in_match and (aim_active or esp_on):
-            scan = max(float(cfg[IDX_ESP_MAX_DIST]), float(cfg[IDX_AIM_MAX_DIST]))
+        track_active = _flag(cfg, F_TRACK_VIEW)
+        render_on = _flag(cfg, F_RENDER_ENTITIES)
+        if in_match and (track_active or render_on):
+            scan = max(float(cfg[IDX_RENDER_MAX_DIST]), float(cfg[IDX_TRACK_MAX_DIST]))
             interval = 0.0
-            want_gun = esp_on and _flag(cfg, F_ESP_GUN)
-            want_bone = esp_on and _flag(cfg, F_ESP_SKELETON)
+            want_gun = render_on and _flag(cfg, F_RENDER_EQUIPMENT)
+            want_bone = render_on and _flag(cfg, F_RENDER_SKELETON)
             if now - _last_gather >= interval or _gather_cache[1] is None:
                 cam, origin, items = _query_visible_entities(scan, want_gun, want_bone)
                 _gather_cache = (now, cam, origin, items)
                 _last_gather = now
             else:
                 _, cam, origin, items = _gather_cache
-            if esp_on and now - _diag_t >= 5.0:
+            if render_on and now - _diag_t >= 5.0:
                 _diag_t = now
                 try:
                     total = len(_collect_space_entities(getattr(genv, 'space', None)))
@@ -3542,9 +3947,9 @@ def _on_story_tick(dt):
                     brief = ','.join('%s=%d' % (k, len(v)) for k, v in list(cats.items())[:12])
                 except Exception:
                     brief = ''
-                _sys_log('diag match=%s hall=%s ents=%d items=%d aim=%d esp=%d cats[%s]' %
+                _sys_log('diag match=%s hall=%s ents=%d items=%d track=%d render=%d cats[%s]' %
                      (in_match, getattr(genv, 'is_in_hall', None), total, len(items),
-                      1 if aim_active else 0, 1 if esp_on else 0, brief))
+                      1 if track_active else 0, 1 if render_on else 0, brief))
                 for it in items[:4]:
                     try:
                         _sys_log('diag ent type=%s id=%s dist=%.1f team=%s is_team=%s scr=(%.3f,%.3f)' %
@@ -3560,15 +3965,14 @@ def _on_story_tick(dt):
                 cam = None
                 origin = None
             _gather_cache = (now, cam, origin, [])
-        if items and aim_active:
+        if items and track_active:
             t_gather = time.time()
             _update_cam_trajectory(cfg, items, cam, origin, menu_open, dt)
         else:
             t_gather = time.time()
-            _aim_busy = False
-        t_aim = time.time()
-        if in_match and cam is not None:
-            _damp_camera_impulse(cfg, cam, dt, _aim_busy)
+            _track_busy = False
+        t_track = time.time()
+        _sync_impulse_damping(cfg, in_match)
         _last_state = now
         av, lid, team, lpos = _local()
         buf = _serialize_frame_data(cfg, cam, in_match, origin, lpos, items)
@@ -3578,9 +3982,9 @@ def _on_story_tick(dt):
         total = t1 - t0
         if (total > 0.06 or t_aim - t_apply > 0.04) and t0 - _perf_last >= 1.0:
             _perf_last = t0
-            _sys_log('[sys:perf] dt=%.3f total=%.3f apply=%.4f unlock=%.4f gather=%.4f aim=%.4f state=%.4f items=%d' % (
+            _sys_log('[sys:perf] dt=%.3f total=%.3f apply=%.4f unlock=%.4f gather=%.4f track=%.4f state=%.4f items=%d' % (
                 dt, total, t_apply - t0, t_unlock - t_apply, t_gather - t_unlock,
-                t_aim - t_gather, t1 - t_aim, len(items)))
+                t_track - t_gather, t1 - t_track, len(items)))
     except Exception:
         _sys_log(traceback.format_exc())
 
@@ -3612,7 +4016,7 @@ def start():
     _last_apply_seq = -1
     try:
         cfg = _read_cfg()
-        cam, origin, items = _query_visible_entities(float(cfg[IDX_ESP_MAX_DIST]))
+        cam, origin, items = _query_visible_entities(float(cfg[IDX_RENDER_MAX_DIST]))
         av, lid, team, lpos = _local()
         _write(STATE_PATH, _serialize_frame_data(cfg, cam, not bool(getattr(genv, 'is_in_hall', True)), origin, lpos, items))
     except Exception:
@@ -3638,8 +4042,8 @@ def status():
     return {
         'cfg_magic': hex(cfg[IDX_MAGIC]),
         'flags': hex(int(cfg[IDX_FLAGS])),
-        'esp': _flag(cfg, F_ESP),
-        'aim': _flag(cfg, F_AIM),
+        'render': _flag(cfg, F_RENDER_ENTITIES),
+        'track': _flag(cfg, F_TRACK_VIEW),
         'flick': False,
         'menu': _flag(cfg, F_MENU_OPEN),
         'catalog': catsize,
